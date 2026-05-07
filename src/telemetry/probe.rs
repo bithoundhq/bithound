@@ -22,6 +22,14 @@ pub trait Probe: Send + Sync + std::fmt::Debug + 'static {
     async fn observe(&self) -> Result<Self::Output, ProbeError>;
 }
 
+#[async_trait]
+pub trait ProbeEventStream {
+    type Event: Send + 'static;
+
+    async fn next_event(&mut self) -> Option<Self::Event>;
+    fn abort(self);
+}
+
 #[derive(Debug)]
 pub enum ProbeObservation<T> {
     Success {
