@@ -12,3 +12,4 @@ pub trait StateReducer<E> {
     /// Takes a snapshot of the current state.
     fn snapshot(&self) -> Self::Snapshot;
 }
+

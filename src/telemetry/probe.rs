@@ -30,7 +30,7 @@ pub trait ProbeEventStream {
     fn abort(self);
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ProbeObservation<T> {
     Success {
         value: T,
