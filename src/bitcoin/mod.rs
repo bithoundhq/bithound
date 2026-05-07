@@ -1,7 +1,7 @@
 use crate::rpc::RpcError;
 
 mod client;
-mod probes;
+mod telemetry;
 mod types;
 
 #[derive(Debug, thiserror::Error)]
@@ -13,3 +13,4 @@ pub enum Error {
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 }
+

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use tokio::{sync::mpsc, time::Duration};
 
 use crate::{
@@ -8,7 +9,7 @@ use crate::{
         client::BitcoinClient,
         types::{ChainMetrics, NetworkMetrics, PeerMetrics},
     },
-    telemetry::{ProbeConfig, ProbeEventStream, ProbeObservation, ProbeRunner},
+    telemetry::{ProbeConfig, ProbeEventStream, ProbeObservation, ProbeRunner, StateReducer},
 };
 
 mod chain;
@@ -95,5 +96,57 @@ impl ProbeEventStream for BitcoinProbeEventStream {
         for probe in self.probes {
             probe.abort();
         }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct BitcoinTelemetryState {
+    pub chain: Option<ProbeObservation<ChainMetrics>>,
+    pub network: Option<ProbeObservation<NetworkMetrics>>,
+    pub peers: Option<ProbeObservation<PeerMetrics>>,
+
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug)]
+pub struct BitcoinTelemetryReducer {
+    state: BitcoinTelemetryState,
+}
+
+impl BitcoinTelemetryReducer {
+    pub fn new() -> Self {
+        Self {
+            state: BitcoinTelemetryState::default(),
+        }
+    }
+}
+
+impl Default for BitcoinTelemetryReducer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StateReducer<BitcoinProbeEvent> for BitcoinTelemetryReducer {
+    type Snapshot = BitcoinTelemetryState;
+
+    fn apply(&mut self, event: BitcoinProbeEvent) {
+        match event {
+            BitcoinProbeEvent::Chain(obs) => {
+                self.state.chain = Some(obs);
+            }
+            BitcoinProbeEvent::Network(obs) => {
+                self.state.network = Some(obs);
+            }
+            BitcoinProbeEvent::Peer(obs) => {
+                self.state.peers = Some(obs);
+            }
+        }
+
+        self.state.updated_at = Some(Utc::now());
+    }
+
+    fn snapshot(&self) -> Self::Snapshot {
+        self.state.clone()
     }
 }

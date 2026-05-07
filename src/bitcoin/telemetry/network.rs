@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    bitcoin::{client::BitcoinClient, probes::BitcoinProbeEvent, types::NetworkMetrics},
+    bitcoin::{client::BitcoinClient, telemetry::BitcoinProbeEvent, types::NetworkMetrics},
     telemetry::{Probe, ProbeError, ProbeObservation},
 };
 #[derive(Debug)]

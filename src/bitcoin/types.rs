@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ChainMetrics {
     pub blocks: i64,
     pub headers: i64,
@@ -15,7 +15,7 @@ impl ChainMetrics {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NetworkMetrics {
     pub connections: usize,
     pub inbound_conns: usize,
@@ -23,7 +23,7 @@ pub struct NetworkMetrics {
     pub network_active: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PeerMetrics {
     pub min_ping_ms: f64,
     pub avg_ping_ms: f64,
