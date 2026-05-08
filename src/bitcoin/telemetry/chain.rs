@@ -3,16 +3,18 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    bitcoin::{client::BitcoinClient, telemetry::BitcoinProbeEvent, types::ChainMetrics},
-    telemetry::{Probe, ProbeError, ProbeObservation},
+    bitcoin::{client::BitcoinClient, types::ChainMetrics},
+    telemetry::{Probe, ProbeError},
 };
 
+/// Probe that collects [`ChainMetrics`] via `getblockchaininfo`.
 #[derive(Debug)]
 pub struct BitcoinChainProbe {
     rpc: Arc<dyn BitcoinClient>,
 }
 
 impl BitcoinChainProbe {
+    /// Build a probe sharing the given RPC client.
     pub fn new(rpc: Arc<dyn BitcoinClient>) -> Self {
         Self { rpc }
     }
@@ -22,8 +24,12 @@ impl BitcoinChainProbe {
 impl Probe for BitcoinChainProbe {
     type Output = ChainMetrics;
 
-    async fn observe(&self) -> Result<Self::Output, ProbeError> {
-        let info = self.rpc.get_blockchain_info().await?;
+    async fn collect(&self) -> Result<Self::Output, ProbeError> {
+        let info = self
+            .rpc
+            .get_blockchain_info()
+            .await
+            .map_err(|e| ProbeError::Transport(e.to_string()))?;
 
         let chain_metrics = ChainMetrics {
             blocks: info.blocks,
@@ -34,11 +40,5 @@ impl Probe for BitcoinChainProbe {
         };
 
         Ok(chain_metrics)
-    }
-}
-
-impl From<ProbeObservation<ChainMetrics>> for BitcoinProbeEvent {
-    fn from(value: ProbeObservation<ChainMetrics>) -> Self {
-        Self::Chain(value)
     }
 }

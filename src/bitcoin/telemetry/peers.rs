@@ -3,16 +3,22 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    bitcoin::{client::BitcoinClient, telemetry::BitcoinProbeEvent, types::PeerMetrics},
-    telemetry::{Probe, ProbeError, ProbeObservation},
+    bitcoin::{client::BitcoinClient, types::PeerMetrics},
+    telemetry::{Probe, ProbeError},
 };
 
+/// Probe that collects [`PeerMetrics`] via `getpeerinfo`.
+///
+/// Reduces the per-peer response into min / avg / max ping and the worst-case
+/// `synced_headers` / `synced_blocks` across the peer set, so a single lagging
+/// peer surfaces as a low minimum.
 #[derive(Debug)]
 pub struct BitcoinPeerProbe {
     rpc: Arc<dyn BitcoinClient>,
 }
 
 impl BitcoinPeerProbe {
+    /// Build a probe sharing the given RPC client.
     pub fn new(rpc: Arc<dyn BitcoinClient>) -> Self {
         Self { rpc }
     }
@@ -22,8 +28,12 @@ impl BitcoinPeerProbe {
 impl Probe for BitcoinPeerProbe {
     type Output = PeerMetrics;
 
-    async fn observe(&self) -> Result<Self::Output, ProbeError> {
-        let info = self.rpc.get_peer_info().await?;
+    async fn collect(&self) -> Result<Self::Output, ProbeError> {
+        let info = self
+            .rpc
+            .get_peer_info()
+            .await
+            .map_err(|e| ProbeError::Transport(e.to_string()))?;
 
         let avg_ping_ms = if info.0.is_empty() {
             0.0
@@ -66,11 +76,5 @@ impl Probe for BitcoinPeerProbe {
         };
 
         Ok(metrics)
-    }
-}
-
-impl From<ProbeObservation<PeerMetrics>> for BitcoinProbeEvent {
-    fn from(value: ProbeObservation<PeerMetrics>) -> Self {
-        Self::Peer(value)
     }
 }
