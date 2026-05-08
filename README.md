@@ -1,12 +1,12 @@
-# Bithound Sidecar
+# Bithound
 
-Bithound Sidecar is a work-in-progress telemetry agent for Bitcoin infrastructure.
+Bithound is a work-in-progress telemetry agent for Bitcoin infrastructure.
 
 The goal is to provide a lightweight process that runs next to a Bitcoin node, collects operational signals, and exposes them to local or remote consumers. It is currently experimental and not ready for production use.
 
 ## What it will do
 
-Bithound Sidecar is intended to monitor Bitcoin node health and produce structured telemetry around:
+Bithound is intended to monitor Bitcoin node health and produce structured telemetry around:
 
 - chain state
 - network state
@@ -36,7 +36,7 @@ The API, configuration format, metric names, and internal module layout are stil
 
 ## Intended use
 
-Eventually, Bithound Sidecar should be usable as a small local agent that can:
+Eventually, Bithound should be usable as a small local agent that can:
 
 - run alongside a node
 - collect telemetry through RPC and local system APIs
@@ -46,7 +46,7 @@ Eventually, Bithound Sidecar should be usable as a small local agent that can:
 
 ## Non-goals for now
 
-At this stage, Bithound Sidecar is not trying to be:
+At this stage, Bithound is not trying to be:
 
 - a full replacement for Prometheus
 - a full replacement for Grafana
