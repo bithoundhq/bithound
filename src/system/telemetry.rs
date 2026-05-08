@@ -42,16 +42,16 @@ pub struct SystemProbeConfigs {
 impl SystemProbeConfigs {
     /// Build a configuration with reasonable cadences targeting `disk_path`.
     ///
-    /// The disk probe ticks every 30s with a 5s timeout and a 90s TTL —
+    /// The disk probe ticks every 60s with a 5s timeout and a 180s TTL —
     /// disk usage moves slowly relative to chain state, so a longer cadence
     /// keeps overhead low.
     pub fn for_disk(disk_path: PathBuf) -> Self {
         Self {
             disk: DiskConfig {
                 probe: ProbeConfig {
-                    interval: Duration::from_secs(30),
+                    interval: Duration::from_secs(60),
                     timeout: Duration::from_secs(5),
-                    ttl: ChronoDuration::seconds(90),
+                    ttl: ChronoDuration::seconds(180),
                 },
                 path: disk_path,
             },
