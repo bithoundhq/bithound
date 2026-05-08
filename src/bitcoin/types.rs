@@ -4,7 +4,7 @@
 //! is the aggregate consumer-facing view — one [`ProbeSnapshot`] per probe, with
 //! TTL already evaluated at projection time.
 
-use crate::telemetry::ProbeSnapshot;
+use crate::{system::ProcessMetrics, telemetry::ProbeSnapshot};
 
 /// Chain-tip and sync state, derived from `getblockchaininfo`.
 #[derive(Debug, Clone)]
@@ -78,10 +78,15 @@ pub struct MempoolMetrics {
 /// probe, with TTL already applied. Cross-probe invariants (synced, degraded,
 /// healthy, etc.) are intended to live as methods on this type — they read
 /// multiple fields without needing access to any internal probe state.
+///
+/// `process` carries OS-level resource stats for the bitcoind process itself,
+/// resolved from a pidfile or explicit PID. Healthy bitcoind requires both
+/// the RPC-derived fields above *and* a live process.
 #[derive(Debug, Clone)]
 pub struct BitcoinSnapshot {
     pub chain: ProbeSnapshot<ChainMetrics>,
     pub network: ProbeSnapshot<NetworkMetrics>,
     pub peers: ProbeSnapshot<PeerMetrics>,
     pub mempool: ProbeSnapshot<MempoolMetrics>,
+    pub process: ProbeSnapshot<ProcessMetrics>,
 }

@@ -1,11 +1,12 @@
 //! Bitcoin telemetry pipeline.
 //!
-//! Wires the per-probe collection loops (`chain`, `network`, `peers`, `mempool`)
-//! into [`BitcoinTelemetry`], which exposes both per-probe `watch` receivers
-//! and a single aggregate `watch::Receiver<Arc<BitcoinSnapshot>>` that fires on
-//! any underlying change.
+//! Wires the per-probe collection loops (`chain`, `network`, `peers`,
+//! `mempool`, `process`) into [`BitcoinTelemetry`], which exposes both
+//! per-probe `watch` receivers and a single aggregate
+//! `watch::Receiver<Arc<BitcoinSnapshot>>` that fires on any underlying
+//! change.
 
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use chrono::{Duration as ChronoDuration, Utc};
 use tokio::{sync::watch, task::JoinSet, time::Duration};
@@ -15,6 +16,7 @@ use crate::{
         client::BitcoinClient,
         types::{BitcoinSnapshot, ChainMetrics, MempoolMetrics, NetworkMetrics, PeerMetrics},
     },
+    system::{PidSource, ProcessConfig, ProcessMetrics, ProcessProbe},
     telemetry::{ProbeConfig, ProbeSnapshot, evaluate_ttl, spawn_probe},
 };
 
@@ -30,20 +32,27 @@ pub use peers::*;
 
 /// Per-probe configuration for the Bitcoin telemetry domain.
 ///
-/// Each field maps to one probe loop. [`Default`] picks reasonable cadences
-/// for a healthy node — short interval for the chain tip and mempool (which
-/// move on every block / transaction), longer for network and peer state
-/// (which change less often).
+/// Each field maps to one probe loop. There is no [`Default`]: the bitcoind
+/// pidfile location is operator-specific, so callers always supply it via
+/// [`Self::for_node`] (which fills in reasonable cadences for everything
+/// else) or by constructing the struct directly.
 #[derive(Debug, Clone)]
 pub struct BitcoinProbeConfigs {
     pub chain: ProbeConfig,
     pub network: ProbeConfig,
     pub peers: ProbeConfig,
     pub mempool: ProbeConfig,
+    pub process: ProcessConfig,
 }
 
-impl Default for BitcoinProbeConfigs {
-    fn default() -> Self {
+impl BitcoinProbeConfigs {
+    /// Build a configuration with reasonable cadences for a healthy node,
+    /// resolving bitcoind's PID from `bitcoind_pidfile`.
+    ///
+    /// Cadences: 5s for chain and mempool (move on every block / tx), 10s
+    /// for network and peers (slower-changing), 15s for the process probe
+    /// (resource usage). Each TTL is roughly 3× its interval.
+    pub fn for_node(bitcoind_pidfile: PathBuf) -> Self {
         Self {
             chain: ProbeConfig {
                 interval: Duration::from_secs(5),
@@ -64,6 +73,14 @@ impl Default for BitcoinProbeConfigs {
                 interval: Duration::from_secs(5),
                 timeout: Duration::from_secs(2),
                 ttl: ChronoDuration::seconds(15),
+            },
+            process: ProcessConfig {
+                probe: ProbeConfig {
+                    interval: Duration::from_secs(15),
+                    timeout: Duration::from_secs(5),
+                    ttl: ChronoDuration::seconds(45),
+                },
+                pid_source: PidSource::Pidfile(bitcoind_pidfile),
             },
         }
     }
@@ -86,6 +103,7 @@ pub struct BitcoinTelemetry {
     network: watch::Receiver<ProbeSnapshot<NetworkMetrics>>,
     peers: watch::Receiver<ProbeSnapshot<PeerMetrics>>,
     mempool: watch::Receiver<ProbeSnapshot<MempoolMetrics>>,
+    process: watch::Receiver<ProbeSnapshot<ProcessMetrics>>,
     snapshot: watch::Receiver<Arc<BitcoinSnapshot>>,
     cfg: BitcoinProbeConfigs,
     tasks: JoinSet<()>,
@@ -94,9 +112,11 @@ pub struct BitcoinTelemetry {
 impl BitcoinTelemetry {
     /// Spawn every probe in the Bitcoin domain plus the aggregator task.
     ///
-    /// The same `rpc` handle is shared across all probes via `Arc`. The
-    /// returned handle owns the spawned tasks via a [`JoinSet`]; dropping it
-    /// cancels in-flight collections.
+    /// The same `rpc` handle is shared across all RPC-driven probes via
+    /// `Arc`. The process probe doesn't use `rpc` — it resolves bitcoind's
+    /// PID from the configured [`PidSource`]. The returned handle owns the
+    /// spawned tasks via a [`JoinSet`]; dropping it cancels in-flight
+    /// collections.
     pub fn spawn(rpc: Arc<dyn BitcoinClient>, cfg: BitcoinProbeConfigs) -> Self {
         let mut tasks = JoinSet::new();
 
@@ -120,14 +140,20 @@ impl BitcoinTelemetry {
             cfg.mempool.clone(),
             &mut tasks,
         );
+        let process = spawn_probe(
+            ProcessProbe::new(cfg.process.pid_source.clone()),
+            cfg.process.probe.clone(),
+            &mut tasks,
+        );
 
-        let initial = Self::project(&chain, &network, &peers, &mempool, &cfg);
+        let initial = Self::project(&chain, &network, &peers, &mempool, &process, &cfg);
         let (snap_tx, snap_rx) = watch::channel(Arc::new(initial));
 
         let mut chain_rx = chain.clone();
         let mut network_rx = network.clone();
         let mut peers_rx = peers.clone();
         let mut mempool_rx = mempool.clone();
+        let mut process_rx = process.clone();
         let cfg_aggregator = cfg.clone();
         tasks.spawn(async move {
             loop {
@@ -136,6 +162,7 @@ impl BitcoinTelemetry {
                     res = network_rx.changed() => if res.is_err() { break; },
                     res = peers_rx.changed() => if res.is_err() { break; },
                     res = mempool_rx.changed() => if res.is_err() { break; },
+                    res = process_rx.changed() => if res.is_err() { break; },
                 }
 
                 let snap = Self::project(
@@ -143,6 +170,7 @@ impl BitcoinTelemetry {
                     &network_rx,
                     &peers_rx,
                     &mempool_rx,
+                    &process_rx,
                     &cfg_aggregator,
                 );
                 if snap_tx.send(Arc::new(snap)).is_err() {
@@ -156,6 +184,7 @@ impl BitcoinTelemetry {
             network,
             peers,
             mempool,
+            process,
             snapshot: snap_rx,
             cfg,
             tasks,
@@ -172,6 +201,7 @@ impl BitcoinTelemetry {
         network: &watch::Receiver<ProbeSnapshot<NetworkMetrics>>,
         peers: &watch::Receiver<ProbeSnapshot<PeerMetrics>>,
         mempool: &watch::Receiver<ProbeSnapshot<MempoolMetrics>>,
+        process: &watch::Receiver<ProbeSnapshot<ProcessMetrics>>,
         cfg: &BitcoinProbeConfigs,
     ) -> BitcoinSnapshot {
         let now = Utc::now();
@@ -180,6 +210,7 @@ impl BitcoinTelemetry {
             network: evaluate_ttl(network.borrow().clone(), cfg.network.ttl, now),
             peers: evaluate_ttl(peers.borrow().clone(), cfg.peers.ttl, now),
             mempool: evaluate_ttl(mempool.borrow().clone(), cfg.mempool.ttl, now),
+            process: evaluate_ttl(process.borrow().clone(), cfg.process.probe.ttl, now),
         }
     }
 
@@ -194,6 +225,7 @@ impl BitcoinTelemetry {
             &self.network,
             &self.peers,
             &self.mempool,
+            &self.process,
             &self.cfg,
         )
     }
@@ -227,6 +259,11 @@ impl BitcoinTelemetry {
     /// Subscribe to mempool probe observations only.
     pub fn mempool(&self) -> watch::Receiver<ProbeSnapshot<MempoolMetrics>> {
         self.mempool.clone()
+    }
+
+    /// Subscribe to bitcoind process probe observations only.
+    pub fn process(&self) -> watch::Receiver<ProbeSnapshot<ProcessMetrics>> {
+        self.process.clone()
     }
 
     /// Abort every spawned task and await their termination.
