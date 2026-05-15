@@ -1,10 +1,3 @@
-use crate::{
-    incidents::IncidentKind,
-    observations::{IncidentSignalObservation, SignalName},
-    read_models::Projected,
-    shared::types::EntityRef,
-};
-
 mod capability;
 mod health;
 mod heartbeat;

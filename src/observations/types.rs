@@ -71,6 +71,171 @@ impl Observation {
             }),
         }
     }
+
+    pub fn capability(
+        ctx: ObservationContext,
+        name: impl Into<String>,
+        status: CapabilityStatus,
+        reason: Option<String>,
+        attributes: Attributes,
+    ) -> Self {
+        Self {
+            id: ObservationId::new(),
+            observed_at: ctx.observed_at,
+            received_at: None,
+            source: ctx.source,
+            subject: ctx.subject,
+            origin: ctx.origin,
+            attributes,
+            payload: ObservationPayload::Capability(CapabilityObservation {
+                capability: CapabilityName(name.into()),
+                status,
+                reason,
+            }),
+        }
+    }
+
+    pub fn event(
+        ctx: ObservationContext,
+        name: impl Into<String>,
+        severity: EventSeverity,
+        body: Option<String>,
+        attributes: Attributes,
+    ) -> Self {
+        Self {
+            id: ObservationId::new(),
+            observed_at: ctx.observed_at,
+            received_at: None,
+            source: ctx.source,
+            subject: ctx.subject,
+            origin: ctx.origin,
+            attributes,
+            payload: ObservationPayload::Event(EventObservation {
+                name: EventName(name.into()),
+                severity,
+                body,
+            }),
+        }
+    }
+
+    pub fn heartbeat(
+        ctx: ObservationContext,
+        sequence: u64,
+        sidecar_time: Timestamp,
+        monotonic_uptime_ms: Option<u64>,
+        sidecar_version: impl Into<String>,
+        status: HeartbeatStatus,
+        collector_statuses: Vec<CollectorStatus>,
+        attributes: Attributes,
+    ) -> Self {
+        Self {
+            id: ObservationId::new(),
+            observed_at: ctx.observed_at,
+            received_at: None,
+            source: ctx.source,
+            subject: ctx.subject,
+            origin: ctx.origin,
+            attributes,
+            payload: ObservationPayload::Heartbeat(HeartbeatObservation {
+                sequence,
+                sidecar_time,
+                monotonic_uptime_ms,
+                sidecar_version: sidecar_version.into(),
+                status,
+                collector_statuses,
+            }),
+        }
+    }
+
+    pub fn health(
+        ctx: ObservationContext,
+        target: impl Into<String>,
+        status: HealthStatus,
+        latency_ms: Option<u64>,
+        message: Option<String>,
+        error: Option<HealthError>,
+        attributes: Attributes,
+    ) -> Self {
+        Self {
+            id: ObservationId::new(),
+            observed_at: ctx.observed_at,
+            received_at: None,
+            source: ctx.source,
+            subject: ctx.subject,
+            origin: ctx.origin,
+            attributes,
+            payload: ObservationPayload::Health(HealthCheckObservation {
+                target: HealthTarget(target.into()),
+                status,
+                latency_ms,
+                message,
+                error,
+            }),
+        }
+    }
+
+    pub fn inventory(
+        ctx: ObservationContext,
+        name: impl Into<String>,
+        facts: BTreeMap<String, InventoryValue>,
+        attributes: Attributes,
+    ) -> Self {
+        Self {
+            id: ObservationId::new(),
+            observed_at: ctx.observed_at,
+            received_at: None,
+            source: ctx.source,
+            subject: ctx.subject,
+            origin: ctx.origin,
+            attributes,
+            payload: ObservationPayload::Inventory(InventoryObservation {
+                name: InventoryName(name.into()),
+                facts,
+            }),
+        }
+    }
+
+    pub fn state(
+        ctx: ObservationContext,
+        state: StateObservation,
+        attributes: Attributes,
+    ) -> Self {
+        Self {
+            id: ObservationId::new(),
+            observed_at: ctx.observed_at,
+            received_at: None,
+            source: ctx.source,
+            subject: ctx.subject,
+            origin: ctx.origin,
+            attributes,
+            payload: ObservationPayload::State(state),
+        }
+    }
+
+    pub fn transition(
+        ctx: ObservationContext,
+        name: impl Into<String>,
+        from: StateAtom,
+        to: StateAtom,
+        reason: Option<String>,
+        attributes: Attributes,
+    ) -> Self {
+        Self {
+            id: ObservationId::new(),
+            observed_at: ctx.observed_at,
+            received_at: None,
+            source: ctx.source,
+            subject: ctx.subject,
+            origin: ctx.origin,
+            attributes,
+            payload: ObservationPayload::Transition(TransitionObservation {
+                name: TransitionName(name.into()),
+                from,
+                to,
+                reason,
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
