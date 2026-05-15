@@ -2,13 +2,13 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[cfg(feature = "telegram")]
-use crate::notifications::targets::telegram::TelegramTarget;
-#[cfg(feature = "webhook")]
-use crate::notifications::targets::webhook::WebhookTarget;
 use crate::{
     incidents::{IncidentKind, IncidentLifecycleEvent, IncidentSeverity},
-    notifications::targets::{discord::DiscordChannelId, telegram::TelegramChatId},
+    notifications::targets::{
+        discord::{DiscordChannelId, DiscordTarget},
+        telegram::{TelegramChatId, TelegramTarget},
+        webhook::WebhookTarget,
+    },
     shared::types::IncidentId,
 };
 
@@ -109,15 +109,12 @@ pub enum NotificationDeliveryStatus {
     Failed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum NotificationTarget {
     #[cfg(debug_assertions)]
     Stdout,
-    #[cfg(feature = "discord")]
-    Discord,
-    #[cfg(feature = "telegram")]
+    Discord(DiscordTarget),
     Telegram(TelegramTarget),
-    #[cfg(feature = "webhook")]
     Webhook(WebhookTarget),
 }
 
@@ -148,6 +145,32 @@ pub enum PermanentError {
     AuthFailure,                   // bad bot token, expired creds
     DestinationGone,               // user blocked bot, chat deleted, webhook 410
     BadRequest { detail: String }, // we sent something the API rejected
+    NotConfigured,                 // rule points at a target whose sender wasn't initialized
+}
+
+impl NotificationRule {
+    pub fn matches(&self, event: &IncidentLifecycleEvent) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        let incident = event.incident();
+        if !self.event_kinds.is_empty() && !self.event_kinds.contains(&incident.kind) {
+            return false;
+        }
+        severity_at_least(&incident.severity, &self.min_severity)
+    }
+}
+
+fn severity_at_least(actual: &IncidentSeverity, floor: &IncidentSeverity) -> bool {
+    severity_rank(actual) >= severity_rank(floor)
+}
+
+fn severity_rank(s: &IncidentSeverity) -> u8 {
+    match s {
+        IncidentSeverity::Info => 0,
+        IncidentSeverity::Warning => 1,
+        IncidentSeverity::Critical => 2,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
