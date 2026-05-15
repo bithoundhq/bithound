@@ -1,5 +1,5 @@
 use crate::{
-    observations::{HealthCheckObservation, HealthTarget},
+    observations::{HealthCheckObservation, HealthTargetId},
     read_models::Projected,
     shared::types::EntityRef,
 };
@@ -17,6 +17,6 @@ pub trait HealthReadModel: Send + Sync + std::fmt::Debug {
     fn current_health(
         &self,
         subject: &EntityRef,
-        target: &HealthTarget,
+        target: &HealthTargetId,
     ) -> Option<Projected<HealthCheckObservation>>;
 }

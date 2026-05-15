@@ -1,13 +1,12 @@
 //! Types for health and self-check observations.
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-
-use crate::observations::types::Timestamp;
 
 /// Health checks are active probes. The answer if the application
 /// can reach and use the target at a given time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthCheckObservation {
-    pub target: HealthTarget,
+    pub target: HealthTargetId,
     pub status: HealthStatus,
     pub latency_ms: Option<u64>,
     pub message: Option<String>,
@@ -19,7 +18,7 @@ pub struct HealthCheckObservation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeartbeatObservation {
     pub sequence: u64,
-    pub sidecar_time: Timestamp,
+    pub sidecar_time: DateTime<Utc>,
     pub monotonic_uptime_ms: Option<u64>,
     pub sidecar_version: String,
     pub status: HeartbeatStatus,
@@ -39,13 +38,13 @@ pub enum HeartbeatStatus {
 pub struct CollectorStatus {
     pub collector: String,
     pub status: HealthStatus,
-    pub last_success_at: Option<Timestamp>,
-    pub last_error_at: Option<Timestamp>,
+    pub last_success_at: Option<DateTime<Utc>>,
+    pub last_error_at: Option<DateTime<Utc>>,
     pub last_error_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HealthTarget(pub String);
+pub struct HealthTargetId(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HealthStatus {

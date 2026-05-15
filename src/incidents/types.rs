@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::shared::types::{EntityRef, EvidenceRef, IncidentId, ObservationId, Timestamp};
+use chrono::{DateTime, Utc};
+
+use crate::shared::types::{EntityRef, EvidenceRef, IncidentId, ObservationId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Incident {
@@ -11,9 +13,9 @@ pub struct Incident {
     pub severity: IncidentSeverity,
     pub status: IncidentStatus,
 
-    pub opened_at: Timestamp,
-    pub updated_at: Timestamp,
-    pub resolved_at: Option<Timestamp>,
+    pub opened_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub resolved_at: Option<DateTime<Utc>>,
 
     pub signal_observation_ids: Option<ObservationId>,
     pub evidence: Vec<EvidenceRef>,

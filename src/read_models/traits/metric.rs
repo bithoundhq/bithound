@@ -1,7 +1,9 @@
+use chrono::{DateTime, Utc};
+
 use crate::{
     observations::{MetricName, MetricObservation},
     read_models::Projected,
-    shared::types::{EntityRef, Timestamp},
+    shared::types::EntityRef,
 };
 
 pub trait MetricReadModel: Send + Sync + std::fmt::Debug {
@@ -15,7 +17,7 @@ pub trait MetricReadModel: Send + Sync + std::fmt::Debug {
         &self,
         subject: &EntityRef,
         name: &MetricName,
-        since: Timestamp,
+        since: DateTime<Utc>,
     ) -> Vec<Projected<MetricObservation>>;
 
     // Useful for stale metrics detection.

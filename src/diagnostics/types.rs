@@ -1,14 +1,16 @@
+use chrono::{DateTime, Utc};
+
 use crate::{
     observations::{Confidence, SignalName, SignalSeverity, SignalStatus},
     read_models::{
         CapabilityReadModel, HealthReadModel, HeartbeatReadModel, MetricReadModel, StateReadModel,
     },
-    shared::types::{EntityRef, EvidenceRef, Timestamp},
+    shared::types::{EntityRef, EvidenceRef},
 };
 
 #[derive(Debug)]
 pub struct DiagnosticContext<'a> {
-    pub now: Timestamp,
+    pub now: DateTime<Utc>,
     pub subject: &'a EntityRef,
 
     pub state: &'a dyn StateReadModel,

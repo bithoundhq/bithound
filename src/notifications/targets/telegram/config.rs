@@ -6,8 +6,13 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
+pub enum TelegramSetup {
+    Disabled,
+    Enabled(TelegramNotificationConfig),
+}
+
+#[derive(Debug, Clone)]
 pub struct TelegramNotificationConfig {
-    pub enabled: bool,
     pub bot_token: SecretString,
     pub pairing_enabled: bool,
     pub parse_mode: TelegramParseMode,

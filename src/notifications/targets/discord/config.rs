@@ -1,8 +1,13 @@
 use crate::incidents::{IncidentNotificationEventKind, IncidentSeverity};
 
 #[derive(Debug, Clone)]
+pub enum DiscordSetup {
+    Disabled,
+    Enabled(DiscordNotificationConfig),
+}
+
+#[derive(Debug, Clone)]
 pub struct DiscordNotificationConfig {
-    pub enabled: bool,
     pub min_severity: IncidentSeverity,
     pub lifecycle_events: Vec<IncidentNotificationEventKind>,
     pub default_username: Option<String>,

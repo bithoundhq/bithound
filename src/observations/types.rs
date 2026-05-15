@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
+use crate::collectors::{CollectionError, CollectorRef};
 use crate::shared::types::*;
 
 mod capability;
@@ -30,15 +31,15 @@ pub use transition::*;
 pub struct ObservationContext {
     pub source: ObservationSource,
     pub subject: EntityRef,
-    pub observed_at: Timestamp,
+    pub observed_at: DateTime<Utc>,
     pub origin: ObservationOrigin,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Observation {
     pub id: ObservationId,
-    pub observed_at: Timestamp,
-    pub received_at: Option<Timestamp>,
+    pub observed_at: DateTime<Utc>,
+    pub received_at: Option<DateTime<Utc>>,
     pub source: ObservationSource,
     pub subject: EntityRef,
     pub origin: ObservationOrigin,
@@ -121,7 +122,7 @@ impl Observation {
     pub fn heartbeat(
         ctx: ObservationContext,
         sequence: u64,
-        sidecar_time: Timestamp,
+        sidecar_time: DateTime<Utc>,
         monotonic_uptime_ms: Option<u64>,
         sidecar_version: impl Into<String>,
         status: HeartbeatStatus,
@@ -165,7 +166,7 @@ impl Observation {
             origin: ctx.origin,
             attributes,
             payload: ObservationPayload::Health(HealthCheckObservation {
-                target: HealthTarget(target.into()),
+                target: HealthTargetId(target.into()),
                 status,
                 latency_ms,
                 message,
@@ -195,11 +196,7 @@ impl Observation {
         }
     }
 
-    pub fn state(
-        ctx: ObservationContext,
-        state: StateObservation,
-        attributes: Attributes,
-    ) -> Self {
+    pub fn state(ctx: ObservationContext, state: StateObservation, attributes: Attributes) -> Self {
         Self {
             id: ObservationId::new(),
             observed_at: ctx.observed_at,
@@ -240,10 +237,64 @@ impl Observation {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObservationBatch {
-    pub batch_id: Uuid,
+    pub id: ObservationBatchId,
+    pub collector: CollectorRef,
     pub sidecar_id: SidecarId,
-    pub emitted_at: Timestamp,
-    pub observations: Vec<Observation>,
+    pub window: ProbeWindow,
+    pub result: ProbeResult,
+}
+
+/// Time window of a single probe execution. Constructor enforces start ≤ end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProbeWindow {
+    started_at: DateTime<Utc>,
+    completed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProbeWindowError {
+    Inverted,
+}
+
+impl ProbeWindow {
+    pub fn new(
+        started_at: DateTime<Utc>,
+        completed_at: DateTime<Utc>,
+    ) -> Result<Self, ProbeWindowError> {
+        if completed_at < started_at {
+            return Err(ProbeWindowError::Inverted);
+        }
+        Ok(Self {
+            started_at,
+            completed_at,
+        })
+    }
+
+    pub fn started_at(&self) -> DateTime<Utc> {
+        self.started_at
+    }
+
+    pub fn completed_at(&self) -> DateTime<Utc> {
+        self.completed_at
+    }
+
+    pub fn duration(&self) -> chrono::Duration {
+        self.completed_at - self.started_at
+    }
+}
+
+/// Outcome of a probe pass. Failed probes always carry a HealthCheckObservation;
+/// successful probes never do (health belongs in the observations list if applicable).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ProbeResult {
+    Ok {
+        observations: Vec<Observation>,
+    },
+    Failed {
+        health: HealthCheckObservation,
+        partial_observations: Vec<Observation>,
+        error: CollectionError,
+    },
 }
 
 /// Small, bounded context fields attached to an observation.

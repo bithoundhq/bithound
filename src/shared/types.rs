@@ -1,6 +1,8 @@
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct CollectorId(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct IncidentId(pub Uuid);
@@ -20,15 +22,12 @@ impl ObservationId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct Timestamp(pub i64);
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ObservationBatchId(pub Uuid);
 
-impl Timestamp {
-    pub fn now() -> Self {
-        let now = Utc::now();
-        let millis = now.timestamp_millis();
-
-        Self(millis)
+impl ObservationBatchId {
+    pub fn new() -> Self {
+        Self(Uuid::now_v7())
     }
 }
 
@@ -43,7 +42,7 @@ pub struct EvidenceRef(pub ObservationId);
 pub struct HostId(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct BitcoinNodeId(pub Uuid);
+pub struct BitcoinNodeId(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BitcoinPeerId(pub String);
