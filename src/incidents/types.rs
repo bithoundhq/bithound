@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-use crate::shared::types::{EntityRef, EvidenceRef, ObservationId, Timestamp};
+use crate::shared::types::{EntityRef, EvidenceRef, IncidentId, ObservationId, Timestamp};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Incident {
@@ -26,9 +25,6 @@ pub struct Incident {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct IncidentId(pub Uuid);
-
-#[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
 pub struct IncidentKind(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,9 +42,38 @@ pub enum IncidentStatus {
     Supressed,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IncidentNotificationEventKind {
+    Opened,
+    Escalated,
+    Resolved,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IncidentLifecycleEvent {
     Opened(Incident),
-    Updated(Incident),
+    Escalated {
+        incident: Incident,
+        previous_severity: IncidentSeverity,
+        new_severity: IncidentSeverity,
+    },
     Resolved(Incident),
+}
+
+impl IncidentLifecycleEvent {
+    pub fn notification_kind(&self) -> IncidentNotificationEventKind {
+        match self {
+            IncidentLifecycleEvent::Opened(_) => IncidentNotificationEventKind::Opened,
+            IncidentLifecycleEvent::Escalated { .. } => IncidentNotificationEventKind::Escalated,
+            IncidentLifecycleEvent::Resolved(_) => IncidentNotificationEventKind::Resolved,
+        }
+    }
+
+    pub fn incident(&self) -> &Incident {
+        match self {
+            IncidentLifecycleEvent::Opened(incident)
+            | IncidentLifecycleEvent::Escalated { incident, .. }
+            | IncidentLifecycleEvent::Resolved(incident) => incident,
+        }
+    }
 }
