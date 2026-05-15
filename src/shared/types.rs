@@ -3,6 +3,15 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct IncidentId(pub Uuid);
+
+impl IncidentId {
+    pub fn new() -> Self {
+        Self(Uuid::now_v7())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ObservationId(pub Uuid);
 
 impl ObservationId {
