@@ -1,61 +1,117 @@
 # Bithound
 
-Bithound is a work-in-progress telemetry agent for Bitcoin infrastructure.
+Bithound is a work-in-progress observability sidecar for Bitcoin
+infrastructure. It runs next to a Bitcoin node, observes its state,
+detects operational problems, and notifies the operator.
 
-The goal is to provide a lightweight process that runs next to a Bitcoin node, collects operational signals, and exposes them to local or remote consumers. It is currently experimental and not ready for production use.
+The project is in active development. The full V0 design is complete
+(18 architecture decisions, see `SPEC.md`) and 41 implementation
+tickets are filed in [Issues](../../issues). Code is not yet ready
+for production use.
 
-## What it will do
+## What V0 will do
 
-Bithound is intended to monitor Bitcoin node health and produce structured telemetry around:
+For V0, Bithound monitors a single Bitcoin Core node and detects a
+small set of well-documented operational problems:
 
-- chain state
-- network state
-- peer health
-- RPC availability
-- node synchronization status
-- process and host-level resource usage
-- filesystem and disk pressure
-- incident-relevant signals
+- **Bitcoin Core RPC polling** — `getblockchaininfo`,
+  `getmempoolinfo`, `getnetworkinfo`, `getpeerinfo` on a configurable
+  interval, producing typed state observations and per-call health
+  observations.
+- **Incident detection** — diagnostic rules evaluate the observed
+  state against the operational catalog
+  ([`docs/INCIDENT_CATALOG.md`](docs/INCIDENT_CATALOG.md)) and emit
+  *incident signals* with explicit severity and confidence.
+- **Incident lifecycle** — signals are lifted into durable incidents
+  with fingerprint-based deduplication, monotonic severity, and
+  `Opened` / `Escalated` / `Resolved` lifecycle events.
+- **Notifications** — incident lifecycle events are routed to
+  Telegram, Discord, or generic webhook sinks. Per-rule severity
+  floors and incident-kind filters; rich delivery-receipt taxonomy
+  (delivered / transient / permanent failure).
+- **Local-first storage** — SQLite via `sqlx` for observations,
+  incidents, and (V0.1) suppression rules. Built for a single
+  binary, cloud-portable to Postgres later.
 
-The sidecar will initially focus on Bitcoin Core. Support for Elements/Liquid, Lightning nodes, and other infrastructure may be added later.
+The two V0 diagnostic rules (catalog `A1` and `A3`) cover Bitcoin Core
+tip lag and outbound-peer starvation. The remaining ~15 rules from the
+catalog land in V0.1+.
 
-## Current status
+## Architecture overview
 
-This project is in early development.
+Bithound is structured as one binary with a single-writer pipeline:
 
-The internal architecture is being designed around:
+```text
+collectors → observations → read models → diagnostics → incident engine → notifier
+```
 
-- probes that collect individual measurements
-- probe runners that execute probes periodically
-- observation streams for raw probe results
-- reducers that maintain telemetry state
-- snapshots that expose the latest known node state
-- consumers/exporters that can publish metrics or detect incidents
+- **Collectors** acquire data from external sources (Bitcoin Core RPC,
+  eventually ZMQ, LND, host stats) and emit `ObservationBatch`es.
+- **Observations** are immutable typed facts with explicit provenance
+  (subject, source collector, sidecar identity, origin).
+- **Read models** are six per-observation-type projections behind a
+  thin store. They serve queries to diagnostic rules.
+- **Diagnostics** are stateless rules that consume read models and
+  emit `IncidentSignalDraft`s. Hysteresis is rule-owned.
+- **Incident engine** validates drafts against a config-driven kind
+  registry, fingerprints them as `(subject, kind, dimension)`,
+  manages incident lifecycle, and emits notify-worthy events.
+- **Notifier** matches lifecycle events against notification rules and
+  dispatches to typed sinks (Telegram, Discord, webhook).
 
-The API, configuration format, metric names, and internal module layout are still subject to change.
+The runtime is a tokio multi-thread setup with one task per collector
+and a single consumer task that owns the read-model store and engine
+state. No locking on the hot path.
 
-## Intended use
+## Roadmap
 
-Eventually, Bithound should be usable as a small local agent that can:
+| Milestone | Scope |
+|-----------|-------|
+| V0     | Single Bitcoin Core node, two diagnostic rules, three notification sinks, SQLite storage, local config. |
+| V0.1   | LND + host collectors, additional diagnostic rules, suppression rules + maintenance windows, observation-store replay. |
+| V0.2   | Operator UI, acknowledge / manual resolve, dashboards, file-ref secrets. |
+| V1.0+  | Cloud sync (Postgres backend), HA / multi-sidecar, plugin system. |
 
-- run alongside a node
-- collect telemetry through RPC and local system APIs
-- expose current node state
-- feed dashboards, alerts, and incident detection
-- integrate with the future Bithound Cloud service
+V0 is the current focus. See `IMPLEMENTATION_PLAN.md` for the phase
+breakdown and `TICKETS.md` for the 41 implementation tickets.
 
-## Non-goals for now
+## Non-goals
 
-At this stage, Bithound is not trying to be:
+Bithound is not trying to be:
 
-- a full replacement for Prometheus
-- a full replacement for Grafana
-- a generic infrastructure monitoring agent
+- a Prometheus / Grafana replacement
+- a general infrastructure monitoring agent
 - a wallet
 - a node management daemon
 - an automated recovery system
 
-The first milestone is reliable Bitcoin node observability.
+Its scope is **observation + diagnosis + notification** for
+Bitcoin-adjacent infrastructure. Action and visualization remain the
+operator's responsibility.
+
+## Repository layout
+
+```text
+SPEC.md                   Domain specification + 18 ADRs (the source of truth)
+IMPLEMENTATION_PLAN.md    Phases, milestones, dependency graph, estimates
+TICKETS.md                JIRA-style tickets BTH-1 … BTH-41
+docs/
+└── INCIDENT_CATALOG.md   ~17 documented incident patterns (the diagnostic backlog)
+src/                      Rust crate — currently typed domain model awaiting implementation
+```
+
+## Contributing
+
+V0 is open for implementation work. Tickets are tagged by phase, size,
+and priority — see the [Issues](../../issues) page or filter by:
+
+- `is:open label:phase:01` — Phase 1 (foundation, unblocks everything)
+- `is:open label:priority:high label:size:S` — small high-priority work
+- `is:open label:size:L` — larger stories
+
+Read `SPEC.md` and `IMPLEMENTATION_PLAN.md` before picking up a ticket.
+Each issue references the ADRs it implements; deviations require a new
+ADR appended to `SPEC.md` § 23 before merging.
 
 ## License
 
