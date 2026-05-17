@@ -17,7 +17,7 @@ pub struct Incident {
     pub updated_at: DateTime<Utc>,
     pub resolved_at: Option<DateTime<Utc>>,
 
-    pub signal_observation_ids: Option<ObservationId>,
+    pub signal_observation_ids: Vec<ObservationId>,
     pub evidence: Vec<EvidenceRef>,
 
     pub summary: String,
@@ -41,7 +41,9 @@ pub enum IncidentStatus {
     Open,
     Acknowledged,
     Resolved,
-    Supressed,
+    /// Reserved for V0.2 — operator-acknowledged-known. Not set by the V0/V0.1 engine.
+    /// V0.1 suppression is notifier-side via `SuppressionRule`; see ADR-L5.
+    Suppressed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
