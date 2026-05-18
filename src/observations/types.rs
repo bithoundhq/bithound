@@ -18,6 +18,7 @@ mod state;
 mod transition;
 
 pub use capability::*;
+pub use diagnosis::*;
 pub use event::*;
 pub use health::*;
 pub use incident_signal::*;
@@ -233,6 +234,51 @@ impl Observation {
             }),
         }
     }
+
+    /// Wrap an `IncidentSignalObservation` into a full `Observation`.
+    ///
+    /// Per ADR-R2, signal observations are first-class observations produced
+    /// by the incident engine with `ObservationOrigin::Computed`; the engine
+    /// stamps the appropriate source/subject in `ctx`.
+    pub fn incident_signal(
+        ctx: ObservationContext,
+        signal: IncidentSignalObservation,
+        attributes: Attributes,
+    ) -> Self {
+        Self {
+            id: ObservationId::new(),
+            observed_at: ctx.observed_at,
+            received_at: None,
+            source: ctx.source,
+            subject: ctx.subject,
+            origin: ctx.origin,
+            attributes,
+            payload: ObservationPayload::IncidentSignal(signal),
+        }
+    }
+
+    /// Wrap a `DiagnosisObservation` into a full `Observation`.
+    ///
+    /// Per ADR-R2, diagnosis observations are first-class observations.
+    /// No diagnosis emitter exists in V0; the variant is defined for
+    /// forward compatibility so future richer findings can land without
+    /// enum churn.
+    pub fn diagnosis(
+        ctx: ObservationContext,
+        diagnosis: DiagnosisObservation,
+        attributes: Attributes,
+    ) -> Self {
+        Self {
+            id: ObservationId::new(),
+            observed_at: ctx.observed_at,
+            received_at: None,
+            source: ctx.source,
+            subject: ctx.subject,
+            origin: ctx.origin,
+            attributes,
+            payload: ObservationPayload::Diagnosis(diagnosis),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -316,11 +362,72 @@ pub enum AttributeValue {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ObservationPayload {
     Capability(CapabilityObservation),
+    Diagnosis(DiagnosisObservation),
     Event(EventObservation),
     Heartbeat(HeartbeatObservation),
     Health(HealthCheckObservation),
+    IncidentSignal(IncidentSignalObservation),
     Inventory(InventoryObservation),
     Metric(MetricObservation),
     State(StateObservation),
     Transition(TransitionObservation),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::collectors::{CollectorRef, IntegrationKind};
+    use chrono::Duration;
+
+    fn ctx() -> ObservationContext {
+        ObservationContext {
+            source: ObservationSource {
+                sidecar_id: SidecarId(uuid::Uuid::now_v7()),
+                collector: CollectorRef {
+                    id: CollectorId("test-collector".into()),
+                    integration: IntegrationKind::BitcoinCoreRpc {
+                        interval: Duration::seconds(10),
+                    },
+                    instance_label: "test".into(),
+                },
+            },
+            subject: EntityRef::BitcoinNode(BitcoinNodeId("alice".into())),
+            observed_at: Utc::now(),
+            origin: ObservationOrigin::Computed,
+        }
+    }
+
+    #[test]
+    fn incident_signal_payload_roundtrips_via_serde() {
+        let signal = IncidentSignalObservation {
+            signal: SignalName("bitcoin.no_peers".into()),
+            severity: SignalSeverity::Critical,
+            status: SignalStatus::Active,
+            confidence: Confidence::High,
+            evidence: vec![],
+        };
+        let obs = Observation::incident_signal(ctx(), signal, Attributes(BTreeMap::new()));
+        let json = serde_json::to_string(&obs).expect("serialize");
+        let back: Observation = serde_json::from_str(&json).expect("deserialize");
+        assert!(matches!(
+            back.payload,
+            ObservationPayload::IncidentSignal(_)
+        ));
+    }
+
+    #[test]
+    fn diagnosis_payload_roundtrips_via_serde() {
+        let diagnosis = DiagnosisObservation {
+            diagnosis: DiagnosisName("bitcoin.tip_lag.assessment".into()),
+            summary: "node likely stuck in IBD".into(),
+            confidence: Confidence::Medium,
+            likely_causes: vec!["maxtipage heuristic".into()],
+            recommended_actions: vec!["restart with -maxtipage=...".into()],
+            evidence: vec![],
+        };
+        let obs = Observation::diagnosis(ctx(), diagnosis, Attributes(BTreeMap::new()));
+        let json = serde_json::to_string(&obs).expect("serialize");
+        let back: Observation = serde_json::from_str(&json).expect("deserialize");
+        assert!(matches!(back.payload, ObservationPayload::Diagnosis(_)));
+    }
 }
