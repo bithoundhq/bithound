@@ -52,9 +52,24 @@ These are conventions the user has established, not options:
   if needed.
 - **Don't commit unless asked.** The user merges PRs themselves on their own
   cadence; sometimes they merge between turns.
-- **GitHub issue numbers match BTH numbers** (BTH-1 = #1, etc.). The repo started
-  with zero issues/PRs; all subsequent numbering aligns. Cross-references in
-  commit messages and PR bodies use `#N`.
+- **GitHub issue numbers do not always match BTH numbers.** BTH-1 through
+  BTH-41 line up with issues #1 through #41 because the repo started with
+  zero issues/PRs. From BTH-42 onward, PRs #42–#48 already consumed those
+  numbers when the D-cluster issues were created, so BTH-42…BTH-50 map
+  to issues #49…#57. Issue bodies and cross-references use the GitHub
+  numbers (with the BTH ticket ID in parens, e.g. `Blocked by: #54 (BTH-47)`).
+  Mapping table in `TICKETS.md`.
+- **Stale-base PRs need 'Update branch' before merging.** When two PRs are
+  merged within seconds of each other (or one PR's branch was created
+  before another's recent merge), GitHub may merge the second PR with
+  the *older* main commit as its first parent. The first PR's commit
+  stays reachable in the DAG but its tree changes don't appear on `main`'s
+  first-parent path — the PR shows MERGED, the issue stays OPEN, and
+  `grep` on main can't find the changes. **Always click "Update branch"
+  on the second PR before merging it.** Recovery if it happens anyway:
+  cherry-pick the orphaned commit onto a fresh branch from current main
+  and open a recovery PR. Bithound hit this on PR #44 (BTH-4); PR #61
+  shows the recovery pattern.
 
 ## Commands
 
