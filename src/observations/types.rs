@@ -14,7 +14,7 @@ mod incident_signal;
 mod inventory;
 mod metric;
 mod source;
-mod state;
+pub mod state;
 mod transition;
 
 pub use capability::*;
