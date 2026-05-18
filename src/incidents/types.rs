@@ -7,6 +7,7 @@ use crate::shared::types::{EntityRef, EvidenceRef, IncidentId, ObservationId};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Incident {
     pub id: IncidentId,
+    pub fingerprint: IncidentFingerprint,
     pub kind: IncidentKind,
     pub subject: EntityRef,
 
@@ -28,6 +29,89 @@ pub struct Incident {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct IncidentKind(pub String);
+
+/// Structured primary key for an incident.
+///
+/// Per ADR-L1 §§1–2, the engine computes this from
+/// `(draft.subject, draft.kind, draft.dimension)` on receipt and uses it
+/// as the lookup key for open incidents. `as_key` returns a stable string
+/// form for storage indexing.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct IncidentFingerprint {
+    pub subject: EntityRef,
+    pub kind: IncidentKind,
+    pub dimension: Option<String>,
+}
+
+impl IncidentFingerprint {
+    /// Stable string form for storage indexing.
+    ///
+    /// Format: `"<subject_kind>|<subject_id>|<incident_kind>|<dimension or '-'>"`.
+    pub fn as_key(&self) -> String {
+        let (subject_kind, subject_id) = subject_kind_and_id(&self.subject);
+        let dim = self.dimension.as_deref().unwrap_or("-");
+        format!("{}|{}|{}|{}", subject_kind, subject_id, self.kind.0, dim)
+    }
+}
+
+fn subject_kind_and_id(subject: &EntityRef) -> (&'static str, &str) {
+    match subject {
+        EntityRef::Host(id) => ("host", id.0.as_str()),
+        EntityRef::BitcoinNode(id) => ("bitcoin_node", id.0.as_str()),
+        EntityRef::BitcoinPeer(id) => ("bitcoin_peer", id.0.as_str()),
+        EntityRef::LndNode(id) => ("lnd_node", id.0.as_str()),
+        EntityRef::LndPeer(id) => ("lnd_peer", id.0.as_str()),
+        EntityRef::LndChannel(id) => ("lnd_channel", id.0.as_str()),
+        EntityRef::LndInvoice(id) => ("lnd_invoice", id.0.as_str()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shared::types::BitcoinNodeId;
+
+    fn fp_btc(kind: &str, dim: Option<&str>) -> IncidentFingerprint {
+        IncidentFingerprint {
+            subject: EntityRef::BitcoinNode(BitcoinNodeId("alice".into())),
+            kind: IncidentKind(kind.into()),
+            dimension: dim.map(|s| s.to_string()),
+        }
+    }
+
+    #[test]
+    fn fingerprint_equality_is_structural() {
+        let a = fp_btc("bitcoin.tip_lag", None);
+        let b = fp_btc("bitcoin.tip_lag", None);
+        let c = fp_btc("bitcoin.peer_starvation", None);
+        let d = fp_btc("bitcoin.tip_lag", Some("aux"));
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a, d);
+    }
+
+    #[test]
+    fn as_key_format_no_dimension() {
+        let fp = fp_btc("bitcoin.tip_lag", None);
+        assert_eq!(fp.as_key(), "bitcoin_node|alice|bitcoin.tip_lag|-");
+    }
+
+    #[test]
+    fn as_key_format_with_dimension() {
+        let fp = fp_btc("host.disk_exhaustion", Some("/var/lib/bitcoin"));
+        assert_eq!(
+            fp.as_key(),
+            "bitcoin_node|alice|host.disk_exhaustion|/var/lib/bitcoin"
+        );
+    }
+
+    #[test]
+    fn as_key_is_stable_across_equal_inputs() {
+        let a = fp_btc("bitcoin.tip_lag", Some("x"));
+        let b = fp_btc("bitcoin.tip_lag", Some("x"));
+        assert_eq!(a.as_key(), b.as_key());
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IncidentSeverity {
