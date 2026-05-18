@@ -1155,9 +1155,10 @@ is the next gate.
 
 ## 10.5 Incident engine (designed; not implemented)
 
-Per ADR-L4. The engine lives in `src/incidents/engine.rs`, holds open
-incidents in an in-memory map keyed by `IncidentFingerprint`, and is
-the single mutator of incident state in V0.
+Per ADR-L4, ADR-D1, ADR-D3, and ADR-D4. The engine lives in
+`src/incidents/engine.rs`, holds open incidents in an in-memory map
+keyed by `IncidentFingerprint`, and is the single mutator of incident
+state in V0.
 
 ```rust
 pub struct IncidentEngine {
@@ -1166,20 +1167,28 @@ pub struct IncidentEngine {
     open_incidents: HashMap<IncidentFingerprint, Incident>,
 }
 
+// ADR-D3: full command vocabulary; Acknowledge/Resolve stubbed in V0/V0.1.
 pub enum IncidentCommand {
-    RecordSignal(IncidentSignalDraft),
-    // Acknowledge, Suppress, Unsuppress, Resolve — deferred to V0.2 (ADR-L4 §L4.3, ADR-L5)
+    RecordSignal(UnvalidatedIncidentSignalDraft),
+    Acknowledge { id: IncidentId, by: ActorId, at: DateTime<Utc> },
+    Resolve     { id: IncidentId, by: ActorId, at: DateTime<Utc>, reason: String },
 }
 
-pub struct HandleOutcome {
-    pub signal_observation: Option<Observation>,         // → observation store
-    pub touched_incident:   Option<Incident>,            // → incident repo
-    pub lifecycle_events:   Vec<IncidentLifecycleEvent>, // → Notifier
+// ADR-D4: events-only output (β). HandleOutcome was removed.
+pub enum IncidentEvent {
+    SignalRecorded(Observation),                       // → observation store
+    IncidentTouched(Incident),                         // → incident repo
+    Lifecycle(IncidentLifecycleEvent),                 // → Notifier
+    DraftRejected { rule_id: String, error: DraftError },
+    DraftBelowConfidenceFloor {
+        kind: IncidentKind, confidence: Confidence, floor: Confidence,
+    },
 }
 
+#[derive(Debug, thiserror::Error)]
 pub enum EngineError {
-    Draft(DraftError),
-    // future: AcknowledgeUnknown, SuppressInvalid, …
+    #[error("draft validation: {0:?}")] Draft(DraftError),
+    #[error("command not yet implemented: {0}")] NotYetImplemented(&'static str),
 }
 
 impl IncidentEngine {
@@ -1187,49 +1196,63 @@ impl IncidentEngine {
                open_incidents: Vec<Incident>) -> Self;
 
     pub fn handle(&mut self, cmd: IncidentCommand, now: DateTime<Utc>)
-        -> Result<HandleOutcome, EngineError>;
+        -> Result<Vec<IncidentEvent>, EngineError>;
 }
 ```
 
 ### 10.5.1 Receive-a-draft flow
 
-The canonical `RecordSignal` flow, combining ADRs L1, L2, L3:
+The canonical `RecordSignal` flow, combining ADRs L1, L2, L3, D1, D4:
 
 ```text
-draft arrives at engine
+unvalidated draft arrives in IncidentCommand::RecordSignal(_)
   ↓
-KindRegistry::validate_draft
-  rejected ──→ return DraftError, persist NOTHING
+KindRegistry::validate(unvalidated) → ValidatedIncidentSignalDraft
+  rejected ──→ return Err(EngineError::Draft(_)) — emit no events
   ok
   ↓
 compute fingerprint = (subject, kind, dimension)
   ↓
 build IncidentSignalObservation (sidecar_id, ObservationOrigin::Computed)
-record into HandleOutcome.signal_observation
+emit IncidentEvent::SignalRecorded(observation)              ← first
   ↓
 look up current Incident for this fingerprint
   ↓
 draft.status = Active:
-  no Incident, OR previous is Resolved:
-    if draft.confidence < kind_spec.min_open_confidence: no-op
-    else:                                                 create new Incident,
-                                                          severity = draft.severity,
-                                                          status = Open,
-                                                          emit Opened
+  draft.confidence < kind_spec.min_open_confidence:
+    emit IncidentEvent::DraftBelowConfidenceFloor { … }
+    (no IncidentTouched, no Lifecycle)
+
+  no Incident, OR previous is Resolved (per ADR-L2 §L2.3):
+    create new Incident; severity = draft.severity; status = Open
+    emit IncidentEvent::IncidentTouched(incident)            ← second
+    emit IncidentEvent::Lifecycle(Opened(incident))          ← third
+
   Open Incident exists:
-    append evidence; new_sev = MAX(incident.sev, draft.sev);
-    if new_sev > old_sev: emit Escalated{old_sev, new_sev}
-    else:                 (silent updated_at bump; no event)
+    append evidence; new_sev = MAX(incident.sev, draft.sev) — ADR-L3
+    if new_sev > old_sev:
+      emit IncidentEvent::IncidentTouched(incident)
+      emit IncidentEvent::Lifecycle(Escalated{previous, new})
+    else:
+      emit IncidentEvent::IncidentTouched(incident)
+      (silent updated_at bump, no Lifecycle event — ADR-L3 §L3.3)
 
 draft.status = Cleared:
-  no Open Incident:           no-op
-  Open Incident exists:       status = Resolved, resolved_at = now;
-                              emit Resolved
+  no Open Incident:           emit nothing past SignalRecorded
+  Open Incident exists:       status = Resolved, resolved_at = now
+                              emit IncidentEvent::IncidentTouched(incident)
+                              emit IncidentEvent::Lifecycle(Resolved(incident))
 ```
+
+**Event-ordering invariant (ADR-D4):** within a single `handle()` call,
+events are emitted in side-effect order: `SignalRecorded` → `IncidentTouched`
+→ `Lifecycle`. The runtime iterates events sequentially and trusts the
+order. A unit-tested invariant.
 
 ### 10.5.2 Caller responsibilities (runtime loop)
 
-The engine is pure; the runtime loop owns I/O. Per ADR-L4 §L4.4:
+The engine is pure; the runtime loop owns I/O. Per ADR-L4 §L4.4 and
+ADR-D4 (event-driven dispatch):
 
 ```text
 1. Startup
@@ -1237,16 +1260,26 @@ The engine is pure; the runtime loop owns I/O. Per ADR-L4 §L4.4:
    - open  = incident_repo.load_open().await
    - engine = IncidentEngine::new(kinds, sidecar_id, open)
 
-2. Per draft
-   - outcome = engine.handle(RecordSignal(draft), now)?
-   - if let Some(obs) = outcome.signal_observation: observation_store.append(obs).await
-   - if let Some(inc) = outcome.touched_incident:   incident_repo.save(&inc).await  ← write-through
-   - for ev in outcome.lifecycle_events:            compose msg, notifier.dispatch(&ev, &msg).await
+2. Per draft (unvalidated, from a rule)
+   - events = engine.handle(RecordSignal(unvalidated_draft), now)?
+   - for event in events:
+       match event {
+         SignalRecorded(obs)  → observation_store.append(&obs).await;
+                                read_models.apply(&obs)?
+         IncidentTouched(inc) → incident_repo.save(&inc).await    ← write-through
+         Lifecycle(ev)        → notifier.dispatch(&ev, &compose(&ev)).await
+         DraftRejected{…}     → tracing::warn!(…)
+         DraftBelowConfidenceFloor{…} → tracing::debug!(…)
+       }
 
 3. Repo write failure
    - retry with backoff
    - if exhausted: rollback engine state (future) and surface the error
    - never: skip persistence and proceed to notify
+
+4. Cloud sync (future V1.0+)
+   - the same Vec<IncidentEvent> is pushed to the cloud control plane;
+     no derivation step (per ADR-D4 cloud-readiness rationale)
 ```
 
 The "never skip persistence" rule is what makes the no-reconciliation
@@ -1602,18 +1635,22 @@ the pipeline:
     subject = entity_ref_from(batch.collector.target)
     ctx = DiagnosticContext { now, subject, &read_models … }
     for rule in rules:
-        drafts = rule.evaluate(ctx)?      ← per-batch, against batch's subject (ADR-S2)
+        drafts: Vec<UnvalidatedIncidentSignalDraft> = rule.evaluate(ctx)?  ← ADR-D1
     for draft in drafts:
-        outcome = engine.handle(            ← &mut self, no lock (single writer)
-            IncidentCommand::RecordSignal(draft), now)?
-        if let Some(obs) = outcome.signal_observation:
-            observation_store.append(obs).await
-            read_models.apply(&obs)?
-        if let Some(inc) = outcome.touched_incident:
-            incident_repo.save(&inc).await ← write-through (ADR-L4 §L4.4)
-        for ev in outcome.lifecycle_events:
-            notifier.dispatch(&ev, &compose(&ev)).await
-            ← (V0.1+) notifier consults SuppressionRepository
+        events = engine.handle(             ← &mut self, no lock (single writer)
+            IncidentCommand::RecordSignal(draft), now)?    ← ADR-D4: Vec<IncidentEvent>
+        for event in events:
+            match event {
+                SignalRecorded(obs)  → observation_store.append(&obs).await;
+                                       read_models.apply(&obs)?
+                IncidentTouched(inc) → incident_repo.save(&inc).await  ← write-through
+                Lifecycle(ev)        → notifier.dispatch(&ev, &compose(&ev)).await
+                                       ← (V0.1+) notifier consults SuppressionRepository
+                DraftRejected{…}     → tracing::warn!(…)
+                DraftBelowConfidenceFloor{…} → tracing::debug!(…)
+            }
+        // (V1.0+ cloud sync) the same events are pushed to the cloud
+        // control plane — no derivation step needed (ADR-D4).
 ```
 
 The **single-consumer** property is architecturally load-bearing:
@@ -2090,6 +2127,7 @@ bithound/
     ├── observations/
     │   ├── mod.rs
     │   ├── types.rs                            # + Diagnosis, IncidentSignal in ObservationPayload (ADR-R2)
+    │   ├── events.rs                           # ObservationEvent (ADR-D4)
     │   └── types/
     │       ├── (existing variants)
     │       └── state/
@@ -2118,9 +2156,10 @@ bithound/
     │
     ├── diagnostics/
     │   ├── mod.rs                              # pub mod (ADR-001 §3)
-    │   ├── traits.rs                           # DiagnosticRule
+    │   ├── traits.rs                           # DiagnosticRule (emits Vec<UnvalidatedIncidentSignalDraft>)
     │   ├── types.rs                            # DiagnosticContext + signals field (ADR-001 §4)
-    │   │                                       # IncidentSignalDraft + kind, dimension (ADR-L1)
+    │   │                                       # UnvalidatedIncidentSignalDraft (ADR-D1, L1)
+    │   ├── events.rs                           # DiagnosticEvent (ADR-D4)
     │   └── rules/                              # one module per rule, lands incrementally
     │       ├── bitcoin/
     │       │   ├── tip_lag.rs                  # A1
@@ -2131,7 +2170,8 @@ bithound/
     ├── incidents/                              # ADR-L1, L3, L4, L5
     │   ├── mod.rs
     │   ├── types.rs                            # Incident (+ fingerprint, Vec<ObservationId>, Suppressed)
-    │   ├── engine.rs                           # IncidentEngine, IncidentCommand, HandleOutcome (ADR-L4)
+    │   ├── engine.rs                           # IncidentEngine, IncidentCommand, IncidentEvent (ADR-L4, D3, D4)
+    │   ├── events.rs                           # IncidentEvent enum (ADR-D4)
     │   ├── repository.rs                       # IncidentRepository trait (ADR-L4)
     │   ├── kinds.rs                            # IncidentKindSpec, KindRegistry (ADR-L1)
     │   ├── well_known.rs                       # canonical IncidentKind &'static str (ADR-L1 §5)
@@ -2164,16 +2204,21 @@ bithound/
     │       ├── observation_store.rs
     │       └── incident_repository.rs
     │
-    └── config/                                 # ADR-X1
-        ├── mod.rs                              # Config::load_from_args_and_env, ConfigError
-        ├── sidecar.rs                          # SidecarConfig
-        ├── storage.rs                          # StorageConfig, RetentionConfig
-        ├── runtime.rs                          # RuntimeConfig
-        ├── targets.rs                          # BitcoinNodeConfig + AuthConfig (V0.1: Lnd/Host)
-        ├── collectors.rs                       # CollectorDescriptorConfig
-        ├── notifications.rs                    # NotificationRulesConfig + per-sink configs
-        ├── secrets.rs                          # *_env resolution
-        └── cli.rs                              # Cli (clap derive)
+    ├── config/                                 # ADR-X1
+    │   ├── mod.rs                              # Config::load_from_args_and_env, ConfigError
+    │   ├── sidecar.rs                          # SidecarConfig
+    │   ├── storage.rs                          # StorageConfig, RetentionConfig
+    │   ├── runtime.rs                          # RuntimeConfig
+    │   ├── targets.rs                          # BitcoinNodeConfig + AuthConfig (V0.1: Lnd/Host)
+    │   ├── collectors.rs                       # CollectorDescriptorConfig
+    │   ├── notifications.rs                    # NotificationRulesConfig + per-sink configs
+    │   ├── secrets.rs                          # *_env resolution
+    │   └── cli.rs                              # Cli (clap derive)
+    │
+    ├── notifications/events.rs                 # NotificationEvent (ADR-D4)
+    ├── read_models/events.rs                   # ReadModelEvent (ADR-D4)
+    ├── shared/parse.rs                         # parse_dotted_name + ParseDottedNameError (ADR-D2)
+    └── domain_events.rs                        # top-level DomainEvent envelope (ADR-D4)
 ```
 
 ---
@@ -2390,8 +2435,25 @@ Status after the ADR-L1–L5 round:
   file with full V0 schema.
 - **Secrets handling.** **Resolved by ADR-X1**: env-var refs only
   (`*_env` field suffix), no inline secrets.
-- **Acknowledged / manual-resolve commands** (V0.2, alongside the
-  operator UI).
+- **Acknowledged / manual-resolve commands.** **Resolved by ADR-D3**:
+  full `IncidentCommand` vocabulary defined in V0; V0.2 handlers
+  return `EngineError::NotYetImplemented`.
+- **Suppression commands.** **Resolved by ADR-D3**: separate
+  `SuppressionCommand` enum + `SuppressionService` trait.
+- **Validation-state typing.** **Resolved by ADR-D1**: two distinct
+  structs `UnvalidatedIncidentSignalDraft` and
+  `ValidatedIncidentSignalDraft`; private inner fields on the
+  validated form make `KindRegistry::validate` the only construction
+  path.
+- **Name-newtype validation.** **Resolved by ADR-D2**: shared
+  `parse_dotted_name` + smart constructors for all ten dotted-namespace
+  newtypes. Serde re-validates via `try_from = "String"`.
+- **Workflow output shape.** **Resolved by ADR-D4** (supersedes ADR-L4
+  §L4.2): engine returns `Vec<IncidentEvent>`; `HandleOutcome` removed.
+  Per-context events modules + top-level `DomainEvent` envelope.
+  Cloud-sync ready out of the box.
+- **`ActorId` location.** **Resolved by ADR-D3**: promoted to
+  `src/shared/types.rs`.
 - **Maintenance-window TOML schema** (V0.1).
 - **BitcoinRpcAuth cookie refresh strategy** (read-on-each vs cache;
   ADR-C3 §C3.8 deferred this).
@@ -2411,9 +2473,14 @@ Single binary crate `bithound` 0.1.0. Top-level modules under `src/`:
 ## 21.2 Domain types found
 
 ### shared
-`CollectorId`, `IncidentId`, `ObservationId`, `ObservationBatchId`,
-`SidecarId`, `EvidenceRef`, `EntityRef`, `HostId`, `BitcoinNodeId`,
-`BitcoinPeerId`, `LndNodeId`, `LndPeerId`, `LndChannelId`, `LndInvoiceId`.
+**In code:** `CollectorId`, `IncidentId`, `ObservationId`,
+`ObservationBatchId`, `SidecarId`, `EvidenceRef`, `EntityRef`, `HostId`,
+`BitcoinNodeId`, `BitcoinPeerId`, `LndNodeId`, `LndPeerId`,
+`LndChannelId`, `LndInvoiceId`.
+
+**Designed (ADR-D2, ADR-D3, ADR-L1 §3):** `EntitySubjectKind`,
+`ActorId`, `parse_dotted_name` + `ParseDottedNameError` (in
+`src/shared/parse.rs`).
 
 ### observations
 `Observation`, `ObservationContext`, `ObservationBatch`, `ProbeWindow`,
@@ -2510,9 +2577,25 @@ Single binary crate `bithound` 0.1.0. Top-level modules under `src/`:
 
 **Designed in ADRs, not yet in code:**
 
-- `IncidentCommand::RecordSignal(IncidentSignalDraft)` (ADR-L4 §L4.1).
-  Acknowledge / Suppress / Unsuppress / Resolve variants deferred to
-  V0.2.
+- **Commands** (ADR-D3, full V0 vocabulary; V0.2 handlers stubbed):
+  - `IncidentCommand::{RecordSignal, Acknowledge, Resolve}` (engine).
+  - `SuppressionCommand::{Suppress, Unsuppress}` (separate
+    `SuppressionService`).
+- **Events** (ADR-D4, β events-only output; per-context modules):
+  - `IncidentEvent::{SignalRecorded, IncidentTouched, Lifecycle,
+    DraftRejected, DraftBelowConfidenceFloor}` — the engine's return
+    type, replacing `HandleOutcome` (ADR-L4 §L4.2 superseded).
+  - `ObservationEvent::{BatchProduced, ObservationAppended}`.
+  - `ReadModelEvent::Applied`.
+  - `DiagnosticEvent::{DraftEmitted, RuleFailed}`.
+  - `NotificationEvent::{Dispatched, Suppressed}`.
+  - Top-level `DomainEvent` envelope sums all of the above.
+- **Errors**:
+  - `EngineError::{Draft, NotYetImplemented}` (ADR-D3).
+  - `SuppressionError::{NotYetImplemented, Repository}` (ADR-D3).
+  - `ParseDottedNameError::{Empty, TooLong, BadCharacter,
+    EmptySegment, BadSegmentStart, NoDot}` (ADR-D2).
+  - `DraftError`, `RegistryError` (ADR-L1).
 
 ## 21.5 Storage abstractions found
 
@@ -3242,13 +3325,24 @@ Commands are first-class types: serializable for audit, replayable for
 tests, single instrumentation point for metrics. Stream-processor and
 free-method shapes were rejected (over-engineered / harder to evolve).
 
-### L4.2 — `HandleOutcome` with three channels
+### L4.2 — `HandleOutcome` with three channels — **SUPERSEDED BY ADR-D4**
 
-The engine is **pure policy**: it computes what should happen but
+> **Superseded by ADR-D4.** This section originally defined
+> `HandleOutcome { signal_observation, touched_incident, lifecycle_events }`
+> as the engine's output. ADR-D4 replaces it with
+> `handle(cmd) -> Result<Vec<IncidentEvent>, EngineError>` to support
+> cross-process event consumers (cloud fleet management). See ADR-D4
+> for the current shape; the rest of ADR-L4 (command enum,
+> single-writer rule, sync engine, repository trait) is unaffected.
+>
+> Preserved below for historical context.
+
+~~The engine is **pure policy**: it computes what should happen but
 performs no I/O. The caller threads each channel to the appropriate
-store:
+store:~~
 
 ```rust
+// SUPERSEDED — see ADR-D4
 pub struct HandleOutcome {
     pub signal_observation: Option<Observation>,         // → observation store
     pub touched_incident:   Option<Incident>,            // → incident repo
@@ -3256,10 +3350,10 @@ pub struct HandleOutcome {
 }
 ```
 
-Three channels because every state change needs persistence
+~~Three channels because every state change needs persistence
 (`touched_incident`), but not every state change is notify-worthy
 (silent `updated_at` bumps per ADR-L3 are persisted but emit no
-lifecycle event).
+lifecycle event).~~
 
 ### L4.3 — V0 command set: `RecordSignal` only
 
@@ -5356,6 +5450,719 @@ contribution review tractable.
 - New § 13.bis or extend § 13 with config schema.
 - § 15.b — `src/config/` and `migrations/` modules added.
 - § 21 — add `Config`, `ConfigError`, retention types to inventory.
+
+---
+
+## ADR-D1 — Unvalidated vs validated incident signal draft
+
+**Date.** 2026-05-18.
+**Status.** Accepted.
+**Scope.** Splitting `IncidentSignalDraft` into two types so the compiler
+enforces that `KindRegistry::validate` has been called before the engine
+acts on a draft. Aligns with Wlaschin's "Domain Modeling Made Functional"
+pattern of making validation state visible in the type system.
+
+**Context.** ADR-L1 §§1–2 introduced `IncidentSignalDraft` with `kind`
+and `dimension` fields. `KindRegistry::validate_draft` checks them
+against the registered specs. But the same type is used both before and
+after validation, so nothing prevents the engine from acting on an
+unchecked draft.
+
+**Decision.**
+
+### Two distinct structs
+
+```rust
+// src/diagnostics/types.rs
+pub struct UnvalidatedIncidentSignalDraft {
+    pub subject: EntityRef,
+    pub signal: SignalName,
+    pub kind: IncidentKind,
+    pub dimension: Option<String>,
+    pub severity: SignalSeverity,
+    pub status: SignalStatus,
+    pub confidence: Confidence,
+    pub evidence: Vec<EvidenceRef>,
+}
+```
+
+```rust
+// src/incidents/kinds.rs (or src/incidents/types.rs)
+pub struct ValidatedIncidentSignalDraft {
+    subject: EntityRef,          // ← private
+    signal: SignalName,
+    kind: IncidentKind,
+    dimension: Option<String>,
+    severity: SignalSeverity,
+    status: SignalStatus,
+    confidence: Confidence,
+    evidence: Vec<EvidenceRef>,
+}
+
+impl ValidatedIncidentSignalDraft {
+    pub fn subject(&self) -> &EntityRef { &self.subject }
+    pub fn kind(&self) -> &IncidentKind { &self.kind }
+    pub fn dimension(&self) -> Option<&str> { self.dimension.as_deref() }
+    pub fn severity(&self) -> &SignalSeverity { &self.severity }
+    pub fn status(&self) -> &SignalStatus { &self.status }
+    pub fn confidence(&self) -> &Confidence { &self.confidence }
+    pub fn evidence(&self) -> &[EvidenceRef] { &self.evidence }
+    pub fn signal(&self) -> &SignalName { &self.signal }
+}
+
+impl KindRegistry {
+    pub fn validate(
+        &self,
+        draft: UnvalidatedIncidentSignalDraft,
+    ) -> Result<ValidatedIncidentSignalDraft, DraftError>;
+}
+```
+
+The unvalidated form has public fields — rules construct it directly.
+The validated form has **private fields and accessor methods**; the
+only way to construct one is via `KindRegistry::validate`. The
+compiler enforces the gate.
+
+### "Unvalidated" represents trust state, not origin
+
+A draft replayed from the observation log, imported from a backup, or
+constructed in a test is still `Unvalidated` until checked. The kind
+registry may have changed between original emission and re-validation.
+
+### Serialization asymmetry
+
+- `UnvalidatedIncidentSignalDraft` is `Clone + Debug + Serialize + Deserialize`.
+- `ValidatedIncidentSignalDraft` is `Clone + Debug + Serialize` but
+  **not** `Deserialize`. Drafts deserialized from storage come back as
+  `Unvalidated` and must re-validate. Stale validation results cannot
+  re-enter the engine.
+
+### Engine input
+
+`IncidentCommand::RecordSignal` carries an `UnvalidatedIncidentSignalDraft`.
+The engine's `handle` validates as the first step.
+
+```rust
+impl IncidentEngine {
+    pub fn handle(&mut self, cmd: IncidentCommand, now: DateTime<Utc>)
+        -> Result<Vec<IncidentEvent>, EngineError>
+    {
+        match cmd {
+            IncidentCommand::RecordSignal(unvalidated) => {
+                let validated = self.kinds.validate(unvalidated)
+                    .map_err(EngineError::Draft)?;
+                self.lift_signal(validated, now)
+            }
+            // … other variants (see ADR-D3)
+        }
+    }
+}
+```
+
+**Rationale.**
+
+- **Compile-time enforcement** of the validation gate. No "did we
+  remember to validate?" bugs possible.
+- **Two named structs** is simpler than `IncidentSignalDraft<State>`
+  phantom-type markers in Rust — derive macros work cleanly, error
+  messages are readable, no marker types to remember.
+- **Trust-state framing** (not origin-based) correctly handles replay,
+  imports, and tests with one rule: anything not produced by
+  `KindRegistry::validate` is `Unvalidated`.
+
+**Alternatives considered.**
+
+- **Type-state via PhantomData** (`IncidentSignalDraft<Validated>`):
+  rejected — ceremonious Debug/Serialize, worse error messages, no
+  upside over two named structs.
+- **Newtype wrapper** (`ValidatedDraft(IncidentSignalDraft)`): rejected
+  — no symmetric way to express the unvalidated state.
+- **Runtime `validated: bool` flag**: rejected — runtime checks are
+  exactly what this ADR moves away from.
+
+**Spec updates queued.**
+
+- § 9.2 — `DiagnosticRule::evaluate` returns
+  `Vec<UnvalidatedIncidentSignalDraft>`.
+- § 10.5 — engine accepts `ValidatedIncidentSignalDraft` internally;
+  validation is the first step of `handle`.
+- § 21.2 — add both struct names to the inventory.
+
+---
+
+## ADR-D2 — Smart constructors for name newtypes
+
+**Date.** 2026-05-18.
+**Status.** Accepted.
+**Scope.** Adding parse-or-fail constructors to the ten dotted-namespace
+name newtypes (`IncidentKind`, `MetricName`, `SignalName`, `StateName`,
+`HealthTargetId`, `CapabilityName`, `EventName`, `TransitionName`,
+`InventoryName`, `DiagnosisName`).
+
+**Context.** The name newtypes are currently
+`pub struct X(pub String)` — any string, including the empty string,
+control characters, or malformed dot-separated forms, can be wrapped.
+Validation happens elsewhere (registry checks, well_known parity tests).
+DMMF says validation belongs at construction; the type guarantees the
+invariant.
+
+**Decision.**
+
+### Shared validation rule
+
+All ten newtypes share the same parse rule:
+
+- Two or more dot-separated segments.
+- Each segment matches `[a-z][a-z0-9_]*`.
+- Total length: 1–128 characters.
+- ASCII printable (the regex above enforces it).
+
+Reference regex (documentation only — actual parser is hand-written for
+better error messages):
+
+```
+^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$
+```
+
+Valid: `bitcoin.tip_lag`, `lnd.channel.inactive`, `host.disk.exhaustion`,
+`sidecar.collector.run_started`.
+Invalid: `tip_lag` (no dot), `BitcoinTipLag` (uppercase),
+`bitcoin..tip_lag` (empty segment), `1bitcoin.x` (digit start),
+`bitcoin.tip-lag` (hyphen).
+
+### Shared parser
+
+```rust
+// src/shared/parse.rs
+pub fn parse_dotted_name(s: &str) -> Result<String, ParseDottedNameError>;
+
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub enum ParseDottedNameError {
+    #[error("name is empty")] Empty,
+    #[error("name exceeds 128 characters (got {got})")] TooLong { got: usize },
+    #[error("invalid character {found:?} at position {at}")]
+    BadCharacter { at: usize, found: char },
+    #[error("empty segment at position {at}")] EmptySegment { at: usize },
+    #[error("segment at position {at} must start with a-z")] BadSegmentStart { at: usize },
+    #[error("name must contain at least one dot")] NoDot,
+}
+```
+
+### Private inner field, parse-or-fail constructor
+
+Each newtype becomes (template):
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct IncidentKind(String);
+
+impl IncidentKind {
+    pub fn parse(s: impl AsRef<str>) -> Result<Self, ParseDottedNameError> {
+        parse_dotted_name(s.as_ref()).map(Self)
+    }
+
+    pub fn as_str(&self) -> &str { &self.0 }
+}
+
+impl AsRef<str> for IncidentKind { fn as_ref(&self) -> &str { &self.0 } }
+impl std::fmt::Display for IncidentKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl TryFrom<String> for IncidentKind {
+    type Error = ParseDottedNameError;
+    fn try_from(s: String) -> Result<Self, Self::Error> { Self::parse(s) }
+}
+impl From<IncidentKind> for String {
+    fn from(k: IncidentKind) -> String { k.0 }
+}
+```
+
+`Serialize` and `Deserialize` round-trip through the string; the
+`try_from = "String"` attribute makes **deserialization re-validate**.
+A maliciously-crafted JSON or TOML value with an invalid name fails to
+deserialize.
+
+### Fast path for well-known constants
+
+```rust
+impl IncidentKind {
+    /// Construct from a known-valid `&'static str`. Debug-asserts the
+    /// parse rule; the `well_known::*` constants are themselves validated
+    /// by parity unit tests, so release builds skip the check.
+    pub fn from_well_known(s: &'static str) -> Self {
+        debug_assert!(parse_dotted_name(s).is_ok(), "invalid well_known name: {s}");
+        Self(s.to_string())
+    }
+}
+```
+
+A unit test in each `well_known.rs` calls `parse_dotted_name` on every
+constant; an invalid constant fails the build before release.
+
+### Per-name semantic helpers
+
+`StateObservation::name()` (BTH-6 — already shipped) returns a
+`StateName` constructed via `from_well_known`. Other typed observation
+helpers (`MetricObservation::name`, etc.) get the same treatment as
+their tickets land.
+
+### Migration plan
+
+The migration is mechanical but scattered. Tickets (see § 24
+implementation plan for D-cluster):
+
+- **BTH-D2.a** — Add `src/shared/parse.rs` with `parse_dotted_name` and
+  `ParseDottedNameError`. Compatibility helpers (`From<String>` parallel
+  to existing `pub` field) so subsequent tickets don't break the build.
+- **BTH-D2.b** — Migrate `IncidentKind` to private field + `parse`.
+  Update all call sites (well_known references, tests).
+- **BTH-D2.c** — Migrate `MetricName` and `SignalName`.
+- **BTH-D2.d** — Migrate `StateName` and `CapabilityName`.
+- **BTH-D2.e** — Migrate the remaining names (`HealthTargetId`,
+  `EventName`, `TransitionName`, `InventoryName`, `DiagnosisName`).
+  Remove the compatibility helpers.
+
+**Rationale.**
+
+- **Make illegal states unrepresentable** at the type system level
+  (Wlaschin's central tenet).
+- **Single parse rule** for all ten newtypes — they share the same
+  semantic shape; one parser, one error type, one test suite.
+- **Private inner field with `as_str()` accessor** preserves serde
+  round-tripping and string display while gating construction.
+- **`try_from = "String"` attribute** is what makes deserialization
+  re-validate; the serde-default `Deserialize` would bypass `parse`.
+- **Well-known fast path** preserves V0 ergonomics for the constants
+  that ship with the binary.
+
+**Alternatives considered.**
+
+- **Keep `pub` inner fields, add `parse()` as advisory**: rejected
+  — the field bypass defeats the gate.
+- **Per-newtype parse rules**: rejected — wasteful, all ten share
+  semantic shape.
+- **Single `Name(String)` newtype across all ten**: rejected — loses
+  type-level distinction between `IncidentKind` and `MetricName`.
+- **Stricter regex** (e.g., max 3 segments, max 32 chars per segment):
+  rejected — the catalog has 4-segment names like
+  `sidecar.collector.run_started`; arbitrary caps invite future churn.
+
+**Spec updates queued.**
+
+- § 21.2 — annotate name newtypes as smart-constructed.
+- § 21.5 (or new § 21.bis) — add `parse_dotted_name` and
+  `ParseDottedNameError` to a "shared utilities" inventory.
+- ADR-L1 §5 — annotate `well_known::*` constants as paired with the
+  per-newtype `from_well_known()` fast path.
+
+---
+
+## ADR-D3 — Full command vocabulary (Incident + Suppression services)
+
+**Date.** 2026-05-18.
+**Status.** Accepted (commands defined now; V0.2 handlers return
+`NotYetImplemented`).
+**Scope.** Define the complete command vocabulary for both the incident
+engine and the (separate) suppression service. Stub V0.2-only handlers
+that aren't wired in V0/V0.1.
+
+**Context.** ADR-L4 §L4.3 defined only `IncidentCommand::RecordSignal`
+for V0; `Acknowledge`, `Suppress`, `Unsuppress`, `Resolve` were deferred
+to V0.2 alongside the operator UI. Leaving the command surface incomplete
+means callers can't know what V0.2 will support without consulting
+documentation. DMMF says: the command vocabulary should be complete at
+the type level even if handlers are stubs.
+
+**Decision.**
+
+### Two distinct command enums
+
+Suppression is notifier-side per ADR-L5 §L5.2 and acts on a different
+aggregate (the `SuppressionRule` registry, not the `Incident`).
+Mixing them on one enum would couple the engine to suppression policy.
+
+```rust
+// src/incidents/engine.rs
+pub enum IncidentCommand {
+    RecordSignal(UnvalidatedIncidentSignalDraft),
+    Acknowledge {
+        id: IncidentId,
+        by: ActorId,
+        at: DateTime<Utc>,
+    },
+    Resolve {
+        id: IncidentId,
+        by: ActorId,
+        at: DateTime<Utc>,
+        reason: String,
+    },
+}
+
+// src/incidents/suppression.rs
+pub enum SuppressionCommand {
+    Suppress {
+        fingerprint: IncidentFingerprint,
+        until: Option<DateTime<Utc>>,
+        by: ActorId,
+        reason: String,
+    },
+    Unsuppress {
+        fingerprint: IncidentFingerprint,
+        by: ActorId,
+    },
+}
+```
+
+### Stub behavior: return `NotYetImplemented`
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum EngineError {
+    #[error("draft validation: {0:?}")] Draft(DraftError),
+    #[error("command not yet implemented: {0}")] NotYetImplemented(&'static str),
+}
+
+impl IncidentEngine {
+    pub fn handle(&mut self, cmd: IncidentCommand, now: DateTime<Utc>)
+        -> Result<Vec<IncidentEvent>, EngineError>
+    {
+        match cmd {
+            IncidentCommand::RecordSignal(draft) => self.handle_record_signal(draft, now),
+            IncidentCommand::Acknowledge { .. } =>
+                Err(EngineError::NotYetImplemented("Acknowledge")),
+            IncidentCommand::Resolve { .. } =>
+                Err(EngineError::NotYetImplemented("Resolve")),
+        }
+    }
+}
+```
+
+Stubs return `Err(EngineError::NotYetImplemented(name))` rather than
+`todo!()` because:
+
+- No runtime panics on misrouted commands.
+- The future operator UI can ship commands incrementally, gating each
+  on the engine's implementation status.
+- Tests can verify the error message rather than catching panics.
+
+### `ActorId` promotion
+
+`ActorId` (strawmaned in ADR-L5 §L5.5) is now referenced by both
+`IncidentCommand` and `SuppressionCommand`. Promote to
+`src/shared/types.rs`:
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ActorId(pub String);
+
+impl ActorId {
+    pub fn system() -> Self { Self("system".into()) }
+    pub fn operator(name: impl Into<String>) -> Self { Self(name.into()) }
+}
+```
+
+Field stays `pub` for V0/V0.1; V0.2's operator UI work introduces real
+user identity, RBAC, and audit. The named constructors document intent
+in the meantime.
+
+### `SuppressionService` trait
+
+```rust
+// src/incidents/suppression.rs
+#[async_trait]
+pub trait SuppressionService: Send + Sync {
+    async fn handle(&self, cmd: SuppressionCommand, now: DateTime<Utc>)
+        -> Result<(), SuppressionError>;
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SuppressionError {
+    #[error("not yet implemented: {0}")] NotYetImplemented(&'static str),
+    #[error("repository: {0}")] Repository(RepoError),
+}
+```
+
+V0/V0.1 has no concrete `SuppressionService`. The trait is defined so
+V0.2 can drop a concrete impl in without architectural change.
+
+### Exhaustive match enforced
+
+The engine's `handle` is an exhaustive match. Adding a new
+`IncidentCommand` variant is a compile error until a handler arm
+exists. Catches "added a command, forgot to wire it" mistakes.
+
+**Rationale.**
+
+- **Type-level completeness** of the command surface lets downstream
+  code (UI, CLI, REST API) discover what's coming via the type system.
+- **Engine vs suppression split** matches ADR-L5's notifier-side
+  suppression model.
+- **Graceful unhandled commands** via `NotYetImplemented` keep the
+  binary robust under misrouting.
+- **`ActorId` in `src/shared/types.rs`** because two command enums use
+  it.
+
+**Alternatives considered.**
+
+- **One `IncidentCommand` enum handling everything**: rejected —
+  couples engine to suppression policy.
+- **`todo!()` stubs**: rejected — runtime panics in production are
+  unacceptable.
+- **`#[cfg(feature = "operator-ui")]` gating**: rejected — complicates
+  the type model and creates compile-time matrix problems.
+
+**Spec updates queued.**
+
+- § 10.5 — engine command set: RecordSignal + Acknowledge + Resolve.
+- § 10.7 — `SuppressionCommand` and `SuppressionService` trait.
+- § 21.2 — promote `ActorId` from "designed (V0.1)" to "shared types".
+- § 21.4 — both command enums in the inventory.
+
+---
+
+## ADR-D4 — Cross-context domain events (β: events-only output)
+
+**Date.** 2026-05-18.
+**Status.** Accepted. **Supersedes ADR-L4 §L4.2 (`HandleOutcome`).**
+**Scope.** Workflow output shape. Specifically: the engine and other
+workflows return `Vec<Event>` rather than structured outcome objects.
+
+**Context.** ADR-L4 §L4.2 defined `HandleOutcome` as the engine's
+output — a struct with `signal_observation`, `touched_incident`, and
+`lifecycle_events` fields. The shape was chosen for static `Option<…>`
+invariants (at-most-one signal observation per command).
+
+Two factors changed the calculus during ADR-D4 review:
+
+1. **Fleet management is on the explicit roadmap.** During the D4
+   brainstorm the user confirmed cloud-side fleet management will be
+   built ("within ~12 months"). This means events must leave the
+   sidecar process at some point — they go to a cloud control plane for
+   aggregation, dashboards, and centralized alerting.
+2. **Cross-process consumers need a uniform event surface.** A sidecar
+   pushing events to the cloud, exposing events to a future operator
+   UI, or feeding peer sidecars all want the same shape: a stream of
+   immutable, typed, named events. Deriving that stream from
+   `HandleOutcome` works (the α+ alternative considered during
+   brainstorm) but creates a drift-risk surface between two parallel
+   representations.
+
+Going β (events-only) now means the engine's behavior **is** the event
+stream — no separate derivation, no drift, no migration when cloud sync
+lands.
+
+**Decision.**
+
+### Engine returns `Vec<IncidentEvent>`
+
+```rust
+impl IncidentEngine {
+    pub fn handle(&mut self, cmd: IncidentCommand, now: DateTime<Utc>)
+        -> Result<Vec<IncidentEvent>, EngineError>;
+}
+```
+
+`HandleOutcome` is removed. All engine state changes are emitted as
+events. **This supersedes ADR-L4 §L4.2.**
+
+### Event hierarchy
+
+```rust
+// src/incidents/events.rs
+pub enum IncidentEvent {
+    /// Signal observation produced by the engine. Caller persists to
+    /// observation store and applies to read models.
+    SignalRecorded(Observation),
+
+    /// Draft was validated and produced an incident state change.
+    /// Caller persists to incident repository. Carries the full
+    /// incident object — never delta fields — so the event is
+    /// self-contained for cloud sync.
+    IncidentTouched(Incident),
+
+    /// Notify-worthy lifecycle transition. Caller dispatches via
+    /// notifier. Wraps the existing `IncidentLifecycleEvent` so
+    /// notification code is unchanged.
+    Lifecycle(IncidentLifecycleEvent),
+
+    /// Validation rejected the draft. No state change occurred.
+    /// Audit-loggable; not dispatched to notifier.
+    DraftRejected {
+        rule_id: String,
+        error: DraftError,
+    },
+
+    /// Draft was below the kind's `min_open_confidence` floor.
+    /// `SignalRecorded` was already emitted; no incident lift.
+    DraftBelowConfidenceFloor {
+        kind: IncidentKind,
+        confidence: Confidence,
+        floor: Confidence,
+    },
+}
+```
+
+### Per-context events modules
+
+```rust
+// src/observations/events.rs
+pub enum ObservationEvent {
+    BatchProduced(ObservationBatch),
+    ObservationAppended { id: ObservationId, payload_kind: &'static str },
+}
+
+// src/read_models/events.rs
+pub enum ReadModelEvent {
+    Applied { observation_id: ObservationId, projection: &'static str },
+}
+
+// src/diagnostics/events.rs
+pub enum DiagnosticEvent {
+    DraftEmitted { rule_id: String, draft: UnvalidatedIncidentSignalDraft },
+    RuleFailed { rule_id: String, error: String },
+}
+
+// src/notifications/events.rs
+pub enum NotificationEvent {
+    Dispatched {
+        rule_id: NotificationRuleId,
+        receipt: DeliveryReceipt,
+    },
+    Suppressed {
+        rule_id: NotificationRuleId,
+        suppression_rule: SuppressionRuleId,
+    },
+}
+```
+
+### Top-level `DomainEvent` envelope
+
+```rust
+// src/domain_events.rs
+pub enum DomainEvent {
+    Observation(ObservationEvent),
+    ReadModel(ReadModelEvent),
+    Diagnostic(DiagnosticEvent),
+    Incident(IncidentEvent),
+    Notification(NotificationEvent),
+}
+```
+
+Used for cross-context audit logging, cloud push, and any future event
+bus. Each context owns its own events module; the top-level envelope
+sums them.
+
+### Caller dispatch pattern
+
+```rust
+let events = engine.handle(cmd, now)?;
+for event in events {
+    match event {
+        IncidentEvent::SignalRecorded(observation) => {
+            observation_store.append(&observation).await?;
+            read_models.apply(&observation)?;
+        }
+        IncidentEvent::IncidentTouched(incident) => {
+            incident_repo.save(&incident).await?;
+        }
+        IncidentEvent::Lifecycle(lifecycle_event) => {
+            let msg = compose_notification_message(&lifecycle_event);
+            notifier.dispatch(&lifecycle_event, &msg).await;
+        }
+        IncidentEvent::DraftRejected { rule_id, error } => {
+            tracing::warn!(rule_id, error = ?error, "diagnostic draft rejected");
+        }
+        IncidentEvent::DraftBelowConfidenceFloor { kind, confidence, floor } => {
+            tracing::debug!(?kind, ?confidence, ?floor, "draft below confidence floor");
+        }
+    }
+}
+```
+
+### Ordering invariant
+
+Within a single `handle()` call, events are emitted in the order side
+effects must occur:
+
+1. **`SignalRecorded(_)`** first — persistence and read-model update
+   precede any incident reasoning.
+2. **`IncidentTouched(_)`** next — incident state durable before
+   notification.
+3. **`Lifecycle(_)`** last — notify only after the incident is
+   persisted.
+4. **`DraftRejected` / `DraftBelowConfidenceFloor`** can appear
+   anywhere — they're terminal-or-no-op outcomes.
+
+This ordering is the **engine's responsibility**. Runtime code iterates
+events sequentially, trusting the order. A unit-tested invariant.
+
+### Cloud-sync handoff
+
+The same `Vec<IncidentEvent>` (or its `DomainEvent` envelope) is what
+gets pushed to the cloud control plane when fleet management lands.
+No conversion step, no derivation — the engine's local behavior and
+the cloud's view are the same data structure.
+
+**Recovered invariants.**
+
+`HandleOutcome` encoded two invariants via `Option<…>`: "at most one
+signal observation per command" and "at most one touched incident."
+With `Vec<IncidentEvent>` those are runtime invariants enforced by:
+
+- The engine implementation (each command's handler emits at most one
+  `SignalRecorded` and at most one `IncidentTouched`).
+- Unit tests that assert event counts per command shape.
+
+Tradeoff accepted: we lose compile-time enforcement of these
+multiplicities in exchange for the cloud-readiness benefits.
+
+**Rationale.**
+
+- **Cloud fleet management is committed roadmap** (~12 months). β
+  eliminates the drift surface and the future refactor cost.
+- **One source of truth.** The engine's behavior is the event stream.
+- **Pay the refactor cost once.** α+ now → β later is 2× work; β now
+  is 1× work plus a slightly steeper initial learning curve.
+- **Whole domain objects in events** (full `Incident`, not delta
+  fields) means cloud consumers don't need engine state to interpret
+  events.
+
+**Alternatives considered.**
+
+- **α (naming only)**: rejected — events would be dead code, prone to
+  drift.
+- **α+ (events derived from `HandleOutcome` for tracing)**: rejected
+  once cloud was confirmed — drift risk + refactor cost.
+- **Hybrid (`HandleOutcome` plus events for cloud only)**: rejected as
+  worst-of-both.
+
+**Migration impact (D4 supersedes pieces of L4/L2/S3).**
+
+- **ADR-L4 §L4.2** (`HandleOutcome` shape): **superseded**.
+- **ADR-L2's decision diagram** (§ "Putting it together"): updated to
+  emit events instead of outcome fields.
+- **ADR-S3 §S3.8** (per-batch consumer pattern): updated to
+  pattern-match events.
+- **BTH-17** ticket (`HandleOutcome`, `EngineError`): re-scoped to
+  define `IncidentEvent` and `EngineError`.
+- **BTH-19** ticket (engine `handle` decision tree): re-scoped to
+  return `Vec<IncidentEvent>`.
+- **BTH-35** ticket (consumer module): re-scoped to event dispatch.
+
+**Spec updates queued.**
+
+- § 10.5 — engine returns `Vec<IncidentEvent>`; `HandleOutcome` removed.
+- § 10.5.1 — receive-a-draft flow updated.
+- § 10.5.2 — caller responsibilities updated.
+- § 12.1 — consumer loop pattern updated.
+- § 21.4 — replace `HandleOutcome` with `IncidentEvent` and per-context
+  events in the inventory.
+- ADR-L4 §L4.2 — annotated as superseded.
+
 
 
 

@@ -1,0 +1,1790 @@
+# Bithound V0 — JIRA-style Tickets
+
+Companion to `IMPLEMENTATION_PLAN.md` and `SPEC.md`. Every ticket
+references the ADR(s) it implements; deviations from the spec require
+a new ADR first.
+
+**Ticket key:** `BTH-N`. Numbering follows phase order; gaps are not
+expected to appear.
+
+**Legend:** Type {Task, Story, Bug}; Priority {High, Medium, Low};
+Estimate {S = ½–1 day, M = 1–2 days, L = 3–5 days}.
+
+---
+
+## Index
+
+| Key   | Title                                                          | Phase | Estimate |
+|-------|----------------------------------------------------------------|-------|----------|
+| BTH-1 | Add sqlx, clap, tokio, tracing-subscriber dependencies         | 1     | S        |
+| BTH-2 | Apply ADR-001 small-call cleanups                              | 1     | S        |
+| BTH-3 | Add `EntitySubjectKind` discriminant for `EntityRef`           | 1     | S        |
+| BTH-4 | Add `IncidentFingerprint` and draft extensions                 | 1     | M        |
+| BTH-5 | Extend `ObservationPayload` with `IncidentSignal`, `Diagnosis` | 1     | S        |
+| BTH-6 | `StateObservation::name()` + state `well_known` constants      | 1     | S        |
+| BTH-7 | Rewrite `StateReadModel`; add `StateReadModelExt`              | 2     | M        |
+| BTH-8 | Add `signals` field to `DiagnosticContext`                     | 2     | S        |
+| BTH-9 | Create `migrations/0001_initial.sql` and pool helper           | 3     | M        |
+| BTH-10| `ObservationStore` trait + `StoreError`                        | 3     | S        |
+| BTH-11| `SqliteObservationStore` impl                                  | 3     | M        |
+| BTH-12| `IncidentRepository` trait + `SqliteIncidentRepository`        | 3     | M        |
+| BTH-13| Retention background task                                      | 3     | S        |
+| BTH-14| In-memory test impls for stores                                | 3     | S        |
+| BTH-15| `IncidentKindSpec`, `KindRegistry`, validation errors          | 4     | M        |
+| BTH-16| `default_kinds.toml` + `well_known` incident-kind constants    | 4     | S        |
+| BTH-17| `IncidentCommand`, `HandleOutcome`, `EngineError`              | 5     | S        |
+| BTH-18| `IncidentEngine` struct, `new()`, state management             | 5     | M        |
+| BTH-19| `IncidentEngine::handle()` decision tree                       | 5     | L        |
+| BTH-20| `Projection` trait + `ProjectionError`                         | 6     | S        |
+| BTH-21| `StateProjection`                                              | 6     | M        |
+| BTH-22| `MetricProjection` with bounded ring                           | 6     | M        |
+| BTH-23| `HealthProjection` + `CapabilityProjection`                    | 6     | M        |
+| BTH-24| `HeartbeatProjection` + `IncidentSignalProjection`             | 6     | M        |
+| BTH-25| `ReadModelStore` assembler + six trait impls                   | 6     | M        |
+| BTH-26| Collector traits + `BatchSink` + sidecar_id on context         | 7     | M        |
+| BTH-27| `BitcoinRpcClient` + `RpcError`                                | 7     | M        |
+| BTH-28| `BitcoinCoreRpcCollector`                                      | 7     | L        |
+| BTH-29| Implement `WebhookSender`                                      | 8     | M        |
+| BTH-30| Implement `TelegramSender`                                     | 8     | M        |
+| BTH-31| Implement `DiscordSender`                                      | 8     | M        |
+| BTH-32| Config types + `clap` CLI surface                              | 9     | M        |
+| BTH-33| TOML loading, env overrides, secrets, validation               | 9     | L        |
+| BTH-34| Collector supervisor module                                    | 10    | M        |
+| BTH-35| Pipeline consumer module                                       | 10    | L        |
+| BTH-36| Bootstrap module — build collectors from config                | 10    | M        |
+| BTH-37| `runtime::run()` + `main.rs` bootstrap                         | 10    | M        |
+| BTH-38| `BitcoinTipLagRule` (catalog A1)                               | 11    | M        |
+| BTH-39| `BitcoinPeerStarvationRule` (catalog A3)                       | 11    | M        |
+| BTH-40| End-to-end integration test (regtest)                          | 12    | L        |
+| BTH-41| README + operator docs update                                  | 12    | M        |
+| BTH-42| Smart-constructor scaffolding (`parse_dotted_name`, `ParseDottedNameError`) | D | S |
+| BTH-43| Migrate `IncidentKind` to smart constructor                    | D     | S        |
+| BTH-44| Migrate `MetricName` and `SignalName`                          | D     | S        |
+| BTH-45| Migrate `StateName` and `CapabilityName`                       | D     | S        |
+| BTH-46| Migrate remaining name newtypes; remove compat helpers         | D     | M        |
+| BTH-47| Unvalidated/Validated draft split + `KindRegistry::validate`   | D     | M        |
+| BTH-48| Promote `ActorId`; extend `IncidentCommand` (Ack/Resolve stubs)| D     | S        |
+| BTH-49| `SuppressionCommand` + `SuppressionService` trait              | D     | S        |
+| BTH-50| Per-context `events.rs` modules + top-level `DomainEvent`      | D     | M        |
+
+**Re-scopes from D-cluster (ADR-D4 supersedes ADR-L4 §L4.2):**
+- BTH-17 — was "IncidentCommand + HandleOutcome + EngineError"; now defines `IncidentEvent` (no `HandleOutcome`).
+- BTH-19 — was "engine handle decision tree returning HandleOutcome"; now returns `Vec<IncidentEvent>`.
+- BTH-35 — was "consumer reads outcome fields"; now consumer pattern-matches events.
+
+**GitHub issue numbering note (BTH-42 onwards):** the BTH-N → GitHub
+issue-#N mapping holds for BTH-1 through BTH-41. From BTH-42 onwards
+the mapping shifts because PRs #42–#48 already consumed those numbers
+when the D-cluster issues were created:
+
+| Ticket | GitHub issue |
+|--------|--------------|
+| BTH-42 | #49          |
+| BTH-43 | #50          |
+| BTH-44 | #51          |
+| BTH-45 | #52          |
+| BTH-46 | #53          |
+| BTH-47 | #54          |
+| BTH-48 | #55          |
+| BTH-49 | #56          |
+| BTH-50 | #57          |
+
+Issue bodies use the GitHub numbers (e.g. "Blocked by: #49 (BTH-42)")
+so cross-references resolve via GitHub autolinking.
+
+---
+
+# Phase 1 — Foundation cleanups
+
+## BTH-1: Add sqlx, clap, tokio, tracing-subscriber dependencies
+
+**Type** Task • **Priority** High • **Estimate** S • **Component** build
+**ADRs** P1, X1, S3 §S3.1 • **Blocked by** — • **Blocks** BTH-9, BTH-11, BTH-32, BTH-37
+
+### Description
+Update `Cargo.toml` to add the dependencies required by subsequent
+tickets. Also adds a minimal CI workflow so quality gates fire on
+every PR going forward.
+
+New deps:
+- `sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "sqlite", "chrono", "uuid", "migrate"] }`
+- `clap = { version = "4", features = ["derive"] }`
+- `tokio = { version = "1", features = ["full"] }` (currently transitive only)
+- `tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }`
+- `toml = "0.8"`
+- `thiserror = "1"`
+
+Add `.github/workflows/ci.yml` running `cargo fmt --check`, `cargo
+clippy -- -D warnings`, `cargo build`, `cargo test`.
+
+### Acceptance criteria
+- [ ] `Cargo.toml` lists the dependencies above with exact features
+- [ ] `cargo check` and `cargo build` succeed with no behavioral changes
+- [ ] `.github/workflows/ci.yml` exists and runs fmt/clippy/build/test
+- [ ] No source files modified beyond what the build requires
+
+---
+
+## BTH-2: Apply ADR-001 small-call cleanups
+
+**Type** Task • **Priority** High • **Estimate** S • **Component** types
+**ADRs** 001 • **Blocked by** — • **Blocks** BTH-4, BTH-8, BTH-15
+
+### Description
+Bundle the six small calls from ADR-001:
+
+1. Rename `IncidentStatus::Supressed` → `Suppressed` everywhere
+   (`src/incidents/types.rs:44` and any callers).
+2. Change `Incident.signal_observation_ids` from `Option<ObservationId>`
+   to `Vec<ObservationId>`.
+3. Mark diagnostics submodules public: `src/diagnostics/mod.rs`
+   becomes `pub mod traits; pub mod types;` and the contained items
+   become reachable from `main.rs` and siblings.
+4. Reserve a future-compatible empty entry for `signals: &dyn
+   IncidentSignalReadModel` in `DiagnosticContext` (BTH-8 adds the
+   real wiring once `IncidentSignalReadModel` is in scope from
+   the trait inventory).
+5. Add `src/incidents/well_known.rs` (empty stub — populated in
+   BTH-16); add `mod well_known;` to `src/incidents/mod.rs`.
+6. Add module declarations `pub mod engine;` and `pub mod
+   repository;` to `src/incidents/mod.rs` pointing at empty stub files
+   (engine and repo land in later tickets).
+
+### Acceptance criteria
+- [ ] No occurrence of `Supressed` remains
+- [ ] `Incident.signal_observation_ids: Vec<ObservationId>` compiles
+- [ ] `cargo doc --no-deps` lists `bithound::diagnostics::{traits, types}`
+- [ ] `bithound::incidents::well_known` exists (may be empty)
+- [ ] `bithound::incidents::{engine, repository}` modules exist (may be empty)
+- [ ] All existing tests pass
+
+---
+
+## BTH-3: Add `EntitySubjectKind` discriminant for `EntityRef`
+
+**Type** Task • **Priority** High • **Estimate** S • **Component** shared
+**ADRs** L1 §3 • **Blocked by** BTH-2 • **Blocks** BTH-4, BTH-15
+
+### Description
+Add a named discriminant enum for `EntityRef` so the kind registry can
+declare which subject kinds an `IncidentKind` permits without using
+`std::mem::discriminant`.
+
+```rust
+// src/shared/types.rs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum EntitySubjectKind {
+    Host, BitcoinNode, BitcoinPeer,
+    LndNode, LndPeer, LndChannel, LndInvoice,
+}
+
+impl EntityRef {
+    pub fn subject_kind(&self) -> EntitySubjectKind { /* match */ }
+}
+```
+
+### Acceptance criteria
+- [ ] `EntitySubjectKind` enum present with all seven variants
+- [ ] `EntityRef::subject_kind()` exhaustively matches; compiler error
+      if a future `EntityRef` variant is added without updating this
+- [ ] `serde` round-trip test for the enum
+- [ ] Unit test asserts `EntitySubjectKind::BitcoinNode ==
+      EntityRef::BitcoinNode(_).subject_kind()`
+
+---
+
+## BTH-4: Add `IncidentFingerprint` and `IncidentSignalDraft` extensions
+
+**Type** Task • **Priority** High • **Estimate** M • **Component** incidents
+**ADRs** L1 §§1–2 • **Blocked by** BTH-2, BTH-3 • **Blocks** BTH-15, BTH-17
+
+### Description
+Introduce the structured fingerprint used by the engine for incident
+identity, and extend `IncidentSignalDraft` to carry the inputs.
+
+```rust
+// src/incidents/types.rs
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct IncidentFingerprint {
+    pub subject: EntityRef,
+    pub kind: IncidentKind,
+    pub dimension: Option<String>,
+}
+
+impl IncidentFingerprint {
+    pub fn as_key(&self) -> String { /* stable string form for indexing */ }
+}
+
+// Also add `fingerprint: IncidentFingerprint` to Incident struct.
+```
+
+```rust
+// src/diagnostics/types.rs
+pub struct IncidentSignalDraft {
+    pub subject: EntityRef,
+    pub signal: SignalName,
+    pub kind: IncidentKind,            // NEW
+    pub dimension: Option<String>,     // NEW
+    pub severity: SignalSeverity,
+    pub status: SignalStatus,
+    pub confidence: Confidence,
+    pub evidence: Vec<EvidenceRef>,
+}
+```
+
+Update `Incident::new()` (or constructor pattern) to take a
+fingerprint. Add a helper `fn compute_fingerprint(draft: &IncidentSignalDraft) -> IncidentFingerprint`.
+
+### Acceptance criteria
+- [ ] `IncidentFingerprint` defined with `as_key()` returning
+      `"<subject_kind>|<subject_id>|<incident_kind>|<dimension or '-'>"`
+- [ ] `Incident.fingerprint` field added
+- [ ] `IncidentSignalDraft.kind` and `.dimension` added
+- [ ] Unit tests cover fingerprint equality and `as_key` stability
+- [ ] All existing tests still pass
+
+---
+
+## BTH-5: Extend `ObservationPayload` with `IncidentSignal`, `Diagnosis`
+
+**Type** Task • **Priority** High • **Estimate** S • **Component** observations
+**ADRs** R2 • **Blocked by** BTH-2 • **Blocks** BTH-19, BTH-24
+
+### Description
+Promote `IncidentSignalObservation` and `DiagnosisObservation` from
+free-standing types to `ObservationPayload` variants. Add the matching
+constructor helpers on `Observation`.
+
+```rust
+pub enum ObservationPayload {
+    Capability(CapabilityObservation),
+    Diagnosis(DiagnosisObservation),               // NEW
+    Event(EventObservation),
+    Heartbeat(HeartbeatObservation),
+    Health(HealthCheckObservation),
+    IncidentSignal(IncidentSignalObservation),     // NEW
+    Inventory(InventoryObservation),
+    Metric(MetricObservation),
+    State(StateObservation),
+    Transition(TransitionObservation),
+}
+
+impl Observation {
+    pub fn incident_signal(ctx: ObservationContext,
+                           signal: IncidentSignalObservation,
+                           attributes: Attributes) -> Self { … }
+    pub fn diagnosis(ctx: ObservationContext,
+                     diagnosis: DiagnosisObservation,
+                     attributes: Attributes) -> Self { … }
+}
+```
+
+### Acceptance criteria
+- [ ] `ObservationPayload` has ten variants
+- [ ] `Observation::incident_signal` and `::diagnosis` constructors exist
+- [ ] Round-trip serde test for each new variant
+- [ ] No other code regresses (existing observation types untouched)
+
+---
+
+## BTH-6: `StateObservation::name()` + state `well_known` constants
+
+**Type** Task • **Priority** High • **Estimate** S • **Component** observations
+**ADRs** R1 §R1.2 • **Blocked by** BTH-2 • **Blocks** BTH-7, BTH-21
+
+### Description
+Each `StateObservation` variant gets a canonical name. Add a parity
+unit test between the variant arms and the constants.
+
+```rust
+// src/observations/types/state.rs
+impl StateObservation {
+    pub fn name(&self) -> StateName {
+        StateName(match self {
+            Self::BitcoinBlockchain(_)  => "bitcoin.blockchain",
+            Self::BitcoinMempool(_)     => "bitcoin.mempool",
+            Self::BitcoinNetwork(_)     => "bitcoin.network",
+            Self::BitcoinPeerSummary(_) => "bitcoin.peer_summary",
+            Self::LndNode(_)            => "lnd.node",
+            Self::LndWallet(_)          => "lnd.wallet",
+            Self::LndChannelSummary(_)  => "lnd.channel_summary",
+            Self::Host(_)               => "host.system",
+        }.to_string())
+    }
+}
+
+// src/observations/types/state/well_known.rs
+pub const BITCOIN_BLOCKCHAIN:    &str = "bitcoin.blockchain";
+pub const BITCOIN_MEMPOOL:       &str = "bitcoin.mempool";
+pub const BITCOIN_NETWORK:       &str = "bitcoin.network";
+pub const BITCOIN_PEER_SUMMARY:  &str = "bitcoin.peer_summary";
+pub const LND_NODE:              &str = "lnd.node";
+pub const LND_WALLET:            &str = "lnd.wallet";
+pub const LND_CHANNEL_SUMMARY:   &str = "lnd.channel_summary";
+pub const HOST_SYSTEM:           &str = "host.system";
+```
+
+### Acceptance criteria
+- [ ] `StateObservation::name()` method present
+- [ ] `well_known` constants present for all eight current variants
+- [ ] Parity unit test fails if a variant is added without a `name`
+      arm or vice versa
+
+---
+
+# Phase 2 — Read-model trait surface
+
+## BTH-7: Rewrite `StateReadModel`; add `StateReadModelExt`
+
+**Type** Task • **Priority** High • **Estimate** M • **Component** read_models
+**ADRs** R1 §§R1.1, R1.3 • **Blocked by** BTH-6 • **Blocks** BTH-21, BTH-25
+
+### Description
+Replace the per-variant methods on `StateReadModel` with generic ones,
+and add an extension trait with typed helpers.
+
+```rust
+// src/read_models/traits/state.rs (REPLACE existing contents)
+pub trait StateReadModel: Send + Sync + std::fmt::Debug {
+    fn latest_state(&self, subject: &EntityRef, name: &StateName)
+        -> Option<Projected<StateObservation>>;
+    fn states_for(&self, subject: &EntityRef)
+        -> Vec<Projected<StateObservation>>;
+}
+```
+
+```rust
+// src/read_models/traits/state_ext.rs (NEW)
+pub trait StateReadModelExt: StateReadModel {
+    fn bitcoin_blockchain(&self, node: &BitcoinNodeId)
+        -> Option<Projected<BitcoinBlockchainState>> { /* unwrap variant */ }
+    // … one helper per StateObservation variant
+}
+impl<T: StateReadModel + ?Sized> StateReadModelExt for T {}
+```
+
+### Acceptance criteria
+- [ ] `StateReadModel` has exactly two methods (`latest_state`, `states_for`)
+- [ ] `StateReadModelExt` provides typed helpers for all eight variants
+- [ ] All existing callers of the old per-variant methods updated
+- [ ] Test that a value retrieved via `latest_state` matches a value
+      retrieved via the corresponding `StateReadModelExt` helper
+
+---
+
+## BTH-8: Add `signals` field to `DiagnosticContext`
+
+**Type** Task • **Priority** High • **Estimate** S • **Component** diagnostics
+**ADRs** 001 §4 • **Blocked by** BTH-2 • **Blocks** BTH-19, BTH-38
+
+### Description
+Add `signals: &'a dyn IncidentSignalReadModel` to `DiagnosticContext`
+so rules emitting `Cleared` signals can see what's currently active.
+
+### Acceptance criteria
+- [ ] `DiagnosticContext` has six trait-object fields (state, metrics,
+      health, capabilities, heartbeats, signals)
+- [ ] `cargo doc --no-deps` shows the new field
+- [ ] No regressions
+
+---
+
+# Phase 3 — Storage layer (SQLite)
+
+## BTH-9: `migrations/0001_initial.sql` + sqlx pool helper
+
+**Type** Task • **Priority** High • **Estimate** M • **Component** storage
+**ADRs** P1 • **Blocked by** BTH-1 • **Blocks** BTH-11, BTH-12
+
+### Description
+Create the initial schema migration and an `open_pool` helper that
+sets up WAL mode, NORMAL synchronous, and runs migrations.
+
+Files:
+- `migrations/0001_initial.sql` — full DDL from ADR-P1.
+- `src/storage/mod.rs` — module declarations.
+- `src/storage/sqlite/mod.rs` — `pub async fn open_pool(path: &Path) -> Result<SqlitePool, StoreError>`.
+
+### Acceptance criteria
+- [ ] `migrations/0001_initial.sql` creates three STRICT tables with
+      ADR-P1's columns and indexes
+- [ ] `open_pool` applies PRAGMAs and runs migrations
+- [ ] Integration test: open a fresh temp-file DB, run `open_pool`,
+      assert tables exist via `sqlite_master`
+- [ ] Re-opening an existing DB is idempotent (migrations skip)
+
+---
+
+## BTH-10: `ObservationStore` trait + `StoreError`
+
+**Type** Task • **Priority** High • **Estimate** S • **Component** storage
+**ADRs** P2 §§P2.1, P2.2 • **Blocked by** BTH-1 • **Blocks** BTH-11, BTH-35
+
+### Description
+Define the trait and error type in `src/storage/traits.rs`.
+
+```rust
+#[async_trait]
+pub trait ObservationStore: Send + Sync {
+    async fn append_many(&self, batch: &[Observation]) -> Result<(), StoreError>;
+    async fn iter_since(&self, since: DateTime<Utc>)
+        -> Result<BoxStream<'_, Result<Observation, StoreError>>, StoreError>;
+
+    async fn append(&self, obs: &Observation) -> Result<(), StoreError> {
+        self.append_many(std::slice::from_ref(obs)).await
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum StoreError {
+    #[error("io: {0}")] Io(#[from] std::io::Error),
+    #[error("database: {0}")] Database(#[from] sqlx::Error),
+    #[error("serialization: {0}")] Serialization(#[from] serde_json::Error),
+    #[error("corruption: {0}")] Corruption(String),
+    #[error("not initialized")] NotInitialized,
+}
+```
+
+### Acceptance criteria
+- [ ] Trait, default `append` shim, and error type present
+- [ ] `thiserror` annotations compile
+- [ ] Doc-comments document the trait contract
+
+---
+
+## BTH-11: `SqliteObservationStore` impl
+
+**Type** Task • **Priority** High • **Estimate** M • **Component** storage
+**ADRs** P1, P2 §P2.3 • **Blocked by** BTH-9, BTH-10 • **Blocks** BTH-35
+
+### Description
+Implement the trait against sqlx + SQLite.
+
+- `append_many`: single transaction, INSERT each row with bound params.
+- `iter_since`: SELECT with `WHERE observed_at >= ? ORDER BY observed_at`,
+  return a `BoxStream` deserializing rows lazily.
+
+### Acceptance criteria
+- [ ] `SqliteObservationStore::open(path)` constructs from a pool path
+- [ ] `append_many` round-trips: write batch, then `iter_since(epoch)`
+      yields the same observations in order
+- [ ] `iter_since` respects the timestamp filter
+- [ ] All ten payload variants survive round-trip (parametrized test)
+- [ ] Concurrent `append_many` calls serialize correctly under WAL
+
+---
+
+## BTH-12: `IncidentRepository` trait + `SqliteIncidentRepository`
+
+**Type** Task • **Priority** High • **Estimate** M • **Component** storage
+**ADRs** L4 §L4.6, P1, P2 §P2.2 • **Blocked by** BTH-9, BTH-4 • **Blocks** BTH-18, BTH-37
+
+### Description
+Add the trait to `src/incidents/repository.rs` and the SQLite impl to
+`src/storage/sqlite/incident_repository.rs`.
+
+```rust
+#[async_trait]
+pub trait IncidentRepository: Send + Sync {
+    async fn load_open(&self) -> Result<Vec<Incident>, RepoError>;
+    async fn save(&self, incident: &Incident) -> Result<(), RepoError>;
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RepoError {
+    #[error("backend: {0}")] Backend(String),
+    #[error("conflict on incident {id:?}")] Conflict { id: IncidentId },
+    #[error("incident not found: {id:?}")] NotFound { id: IncidentId },
+}
+```
+
+Impl: UPSERT on `save` (`INSERT … ON CONFLICT(id) DO UPDATE SET …`);
+`load_open` filters by `status != 'Resolved'`.
+
+### Acceptance criteria
+- [ ] Trait + error type live in `src/incidents/repository.rs`
+- [ ] `SqliteIncidentRepository::open(pool)` returns a working impl
+- [ ] `save` on an existing ID replaces the row atomically
+- [ ] `load_open` returns only open + acknowledged incidents
+- [ ] Round-trip test covers all four `IncidentStatus` values
+      (Suppressed is included for forward compat though unused in V0)
+
+---
+
+## BTH-13: Retention background task
+
+**Type** Task • **Priority** Medium • **Estimate** S • **Component** storage
+**ADRs** P2 §P2.5 • **Blocked by** BTH-9 • **Blocks** BTH-37
+
+### Description
+Add `src/storage/retention.rs` with `run(pool, config, shutdown_rx)`
+that sweeps old rows and runs `VACUUM` on the configured interval.
+
+```rust
+pub struct RetentionConfig {
+    pub observations_max_age: Option<Duration>,
+    pub incidents_max_age:    Option<Duration>,
+    pub suppressions_grace:   Option<Duration>,
+    pub vacuum_interval:      Duration,
+}
+
+pub async fn run(pool: SqlitePool, config: RetentionConfig,
+                 mut shutdown: broadcast::Receiver<()>);
+```
+
+### Acceptance criteria
+- [ ] `RetentionConfig` and `run` defined per ADR-P2 §P2.5
+- [ ] `None` ages disable retention for that table
+- [ ] Test that observations older than `observations_max_age` are
+      deleted after one sweep
+- [ ] Test that resolved incidents older than `incidents_max_age` are deleted
+- [ ] Shutdown signal exits the loop within 1s
+
+---
+
+## BTH-14: In-memory test impls for stores
+
+**Type** Task • **Priority** Medium • **Estimate** S • **Component** storage
+**ADRs** P2 §P2.7 • **Blocked by** BTH-10, BTH-12 • **Blocks** BTH-35 (test path)
+
+### Description
+Implement `MemoryObservationStore` and `MemoryIncidentRepository`
+backed by `tokio::sync::Mutex<Vec<…>>` for use in integration tests.
+
+### Acceptance criteria
+- [ ] Both types implement their respective traits
+- [ ] Trait conformance tests reuse the same suite as the SQLite impls
+- [ ] Live in `src/storage/memory/`
+
+---
+
+# Phase 4 — Kind registry
+
+## BTH-15: `IncidentKindSpec`, `KindRegistry`, validation errors
+
+**Type** Task • **Priority** High • **Estimate** M • **Component** incidents
+**ADRs** L1 §§3–4, L2 §L2.2 • **Blocked by** BTH-3, BTH-4 • **Blocks** BTH-18, BTH-19
+
+### Description
+Add `src/incidents/kinds.rs` with the registry types and loader.
+
+```rust
+pub struct IncidentKindSpec {
+    pub name: String,
+    pub allowed_subjects: Vec<EntitySubjectKind>,
+    pub allows_dimension: bool,
+    pub dimension_label: Option<String>,
+    pub min_open_confidence: Confidence,        // default Medium
+    pub source: KindSource,
+}
+
+pub enum KindSource { Builtin, UserConfig }
+
+pub struct KindRegistry { kinds: HashMap<IncidentKind, IncidentKindSpec> }
+
+impl KindRegistry {
+    pub fn load(user_config: Option<&Path>) -> Result<Self, RegistryError>;
+    pub fn lookup(&self, kind: &IncidentKind) -> Option<&IncidentKindSpec>;
+    pub fn validate_draft(&self, draft: &IncidentSignalDraft) -> Result<(), DraftError>;
+}
+
+pub enum RegistryError { /* per ADR-L1 §4 */ }
+pub enum DraftError    { /* per ADR-L1 §4 */ }
+```
+
+### Acceptance criteria
+- [ ] All four error variants on each enum present
+- [ ] `validate_draft` enforces: known kind, allowed subject, dimension
+      required/forbidden matches spec
+- [ ] Built-in vs user-config layering: user-config attempting to
+      override a built-in returns `CannotOverrideBuiltin`
+- [ ] Unit tests for each `DraftError` variant
+- [ ] Unit test for `validate_draft` happy path
+
+---
+
+## BTH-16: `default_kinds.toml` + `well_known` incident-kind constants
+
+**Type** Task • **Priority** High • **Estimate** S • **Component** incidents
+**ADRs** L1 §§5–6 • **Blocked by** BTH-15 • **Blocks** BTH-38, BTH-39
+
+### Description
+Create `config/default_kinds.toml` with V0 kinds (covering catalog
+A1, A2, A3, A4, X1 and reserving slots for LND), and populate
+`src/incidents/well_known.rs` with matching `&'static str` constants.
+A unit test asserts the TOML and the constants stay in sync.
+
+V0 kinds to include:
+- `bitcoin.tip_lag` — BitcoinNode subject, no dimension
+- `bitcoin.ibd_stall` — BitcoinNode, no dimension
+- `bitcoin.peer_starvation` — BitcoinNode, no dimension
+- `bitcoin.mempool_full` — BitcoinNode, no dimension
+- `bitcoin.reorg_deep` — BitcoinNode, no dimension
+- `host.disk_exhaustion` — Host subject, dimension = "mount_path"
+- `lnd.channel_inactive` — LndChannel subject, no dimension (V0.1)
+- `lnd.htlc_stuck` — LndChannel subject, dimension = "payment_hash" (V0.1)
+- `sidecar.collector_failing` — Host subject, dimension = "collector_id"
+
+### Acceptance criteria
+- [ ] `config/default_kinds.toml` parses cleanly through `KindRegistry::load`
+- [ ] `src/incidents/well_known.rs` const names match TOML names exactly
+- [ ] Parity test fails if either is updated without the other
+
+---
+
+# Phase 5 — Incident engine
+
+## BTH-17: `IncidentCommand`, `IncidentEvent`, `EngineError`
+
+**Type** Task • **Priority** High • **Estimate** S • **Component** incidents
+**ADRs** L4 §L4.1, **D3**, **D4** (supersedes L4 §L4.2) • **Blocked by** BTH-4, BTH-47 (D1), BTH-48 (D3) • **Blocks** BTH-18, BTH-19
+
+### Description
+
+**Re-scoped by ADR-D4.** Previously defined `HandleOutcome`; that shape
+has been superseded by `Vec<IncidentEvent>` for cloud-readiness.
+
+Add the command, event, and error types in `src/incidents/`:
+
+```rust
+// src/incidents/engine.rs (ADR-D3)
+pub enum IncidentCommand {
+    RecordSignal(UnvalidatedIncidentSignalDraft),       // ADR-D1
+    Acknowledge { id: IncidentId, by: ActorId, at: DateTime<Utc> },
+    Resolve     { id: IncidentId, by: ActorId, at: DateTime<Utc>, reason: String },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum EngineError {
+    #[error("draft validation: {0:?}")] Draft(DraftError),
+    #[error("command not yet implemented: {0}")] NotYetImplemented(&'static str),
+}
+
+// src/incidents/events.rs (ADR-D4)
+pub enum IncidentEvent {
+    SignalRecorded(Observation),
+    IncidentTouched(Incident),
+    Lifecycle(IncidentLifecycleEvent),
+    DraftRejected { rule_id: String, error: DraftError },
+    DraftBelowConfidenceFloor {
+        kind: IncidentKind, confidence: Confidence, floor: Confidence,
+    },
+}
+```
+
+### Acceptance criteria
+- [ ] `IncidentCommand` includes RecordSignal (with `UnvalidatedIncidentSignalDraft`), Acknowledge, Resolve
+- [ ] `IncidentEvent` includes all five variants from ADR-D4
+- [ ] `EngineError` includes `Draft` and `NotYetImplemented(&'static str)`
+- [ ] All types `Debug + Clone` where appropriate; `IncidentEvent` is `Serialize` (for cloud sync) but not `Deserialize`
+- [ ] `HandleOutcome` is **not** added (it was the superseded shape)
+
+---
+
+## BTH-18: `IncidentEngine` struct + `new()` + state management
+
+**Type** Task • **Priority** High • **Estimate** M • **Component** incidents
+**ADRs** L4 §§L4.4–L4.6 • **Blocked by** BTH-15, BTH-17, BTH-12 • **Blocks** BTH-19
+
+### Description
+Implement the engine struct and constructor. State is an in-memory
+`HashMap<IncidentFingerprint, Incident>` rebuilt from
+`IncidentRepository::load_open` at startup.
+
+```rust
+pub struct IncidentEngine {
+    kinds: KindRegistry,
+    sidecar_id: SidecarId,
+    open_incidents: HashMap<IncidentFingerprint, Incident>,
+}
+
+impl IncidentEngine {
+    pub fn new(kinds: KindRegistry, sidecar_id: SidecarId,
+               open_incidents: Vec<Incident>) -> Self {
+        let map = open_incidents.into_iter()
+            .map(|inc| (inc.fingerprint.clone(), inc))
+            .collect();
+        Self { kinds, sidecar_id, open_incidents: map }
+    }
+}
+```
+
+### Acceptance criteria
+- [ ] `IncidentEngine::new` builds the map from a Vec
+- [ ] Test: passing N open incidents results in a map of size N keyed
+      by fingerprint
+- [ ] Test: duplicate fingerprints in input panic or are deduplicated
+      (decide; ADR-L4 §L4.4 implies they shouldn't exist)
+
+---
+
+## BTH-19: `IncidentEngine::handle()` decision tree
+
+**Type** Story • **Priority** High • **Estimate** L • **Component** incidents
+**ADRs** L1, L2, L3, L4 §L4.1, **D1**, **D3**, **D4** • **Blocked by** BTH-5, BTH-8, BTH-18, BTH-47 (D1), BTH-48 (D3) • **Blocks** BTH-37
+
+### Description
+
+**Re-scoped by ADR-D4.** Engine now returns `Vec<IncidentEvent>` instead
+of `HandleOutcome`. The decision tree is unchanged in spirit but events
+are emitted per-state-change rather than packed into a struct.
+
+Implement the full decision tree per § 10.5.1 of SPEC.md (event flow):
+
+```rust
+impl IncidentEngine {
+    pub fn handle(&mut self, cmd: IncidentCommand, now: DateTime<Utc>)
+        -> Result<Vec<IncidentEvent>, EngineError>;
+}
+```
+
+Per ADR-D4, the event-ordering invariant within a single `handle()`
+call is `SignalRecorded` → `IncidentTouched` → `Lifecycle`.
+
+### Acceptance criteria
+- [ ] Validation (via `KindRegistry::validate` per ADR-D1) rejects
+      malformed unvalidated drafts with `EngineError::Draft`. No
+      events are emitted on validation failure.
+- [ ] Active draft with no open incident, confidence ≥ floor → emits
+      [`SignalRecorded(obs)`, `IncidentTouched(new)`, `Lifecycle(Opened)`]
+      in that order.
+- [ ] Active draft with confidence below `min_open_confidence` → emits
+      [`SignalRecorded(obs)`, `DraftBelowConfidenceFloor{…}`]. No
+      `IncidentTouched` or `Lifecycle`.
+- [ ] Active draft on existing open incident:
+  - Severity unchanged → emits [`SignalRecorded`, `IncidentTouched`]
+    (no `Lifecycle`). `updated_at` bumped.
+  - Severity strictly increased → emits [`SignalRecorded`,
+    `IncidentTouched`, `Lifecycle(Escalated{prev, new})`].
+- [ ] Active draft on resolved fingerprint (ADR-L2 §L2.3) → new
+      incident; emits the open-flow events for a brand-new incident.
+- [ ] Cleared draft on open incident → emits [`SignalRecorded`,
+      `IncidentTouched(resolved)`, `Lifecycle(Resolved)`].
+- [ ] Cleared draft with no open incident → emits [`SignalRecorded`]
+      only (persist-plus-no-op).
+- [ ] `Acknowledge` and `Resolve` commands return
+      `Err(EngineError::NotYetImplemented(name))` (ADR-D3 stubs).
+- [ ] Test matrix covers all branches (≥ 12 unit tests). Each test
+      asserts on the event sequence, not on struct fields.
+
+---
+
+# Phase 6 — Read-model store
+
+## BTH-20: `Projection` trait + `ProjectionError`
+
+**Type** Task • **Priority** High • **Estimate** S • **Component** read_models
+**ADRs** R1 §R1.4 • **Blocked by** — • **Blocks** BTH-21–24
+
+### Description
+Add `src/read_models/projections/mod.rs` with the trait and error.
+
+```rust
+pub trait Projection: Send + Sync + std::fmt::Debug {
+    fn apply(&mut self, obs: &Observation) -> Result<(), ProjectionError>;
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ProjectionError {
+    #[error("invalid payload: {0}")] InvalidPayload(String),
+    #[error("internal consistency: {0}")] InternalConsistency(String),
+}
+```
+
+### Acceptance criteria
+- [ ] Trait + error compile, doc-commented
+
+---
+
+## BTH-21: `StateProjection`
+
+**Type** Task • **Priority** High • **Estimate** M • **Component** read_models
+**ADRs** R1 §R1.4 • **Blocked by** BTH-6, BTH-7, BTH-20 • **Blocks** BTH-25
+
+### Description
+Add `src/read_models/projections/state.rs`. Stores
+`HashMap<(EntityRef, StateName), Projected<StateObservation>>` and
+applies state observations.
+
+Apply path: only `ObservationPayload::State(_)` is consumed; key is
+`(obs.subject, state.name())`. Existing entry is overwritten when a
+newer `observed_at` arrives; older observations are dropped.
+
+Query helpers `get_latest` and `for_subject` expose what the
+`StateReadModel` trait needs.
+
+### Acceptance criteria
+- [ ] `StateProjection::default()` produces an empty store
+- [ ] `apply` is idempotent for an identical observation
+- [ ] Latest-write-wins by `observed_at` (out-of-order observations
+      don't overwrite newer state)
+- [ ] Each of the eight state variants round-trips through apply →
+      get_latest
+
+---
+
+## BTH-22: `MetricProjection` with bounded ring
+
+**Type** Task • **Priority** High • **Estimate** M • **Component** read_models
+**ADRs** R1, R3 §R3.4 • **Blocked by** BTH-20 • **Blocks** BTH-25
+
+### Description
+Stores `HashMap<(EntityRef, MetricName), VecDeque<Projected<MetricObservation>>>`
+with configurable per-series capacity (default 1000). On apply, push
+to the back; if `len() > capacity`, pop the front.
+
+Query helpers cover `latest_metric`, `metric_samples_since`, and
+`unchanged_for` (returns the run of latest equal-valued samples).
+
+### Acceptance criteria
+- [ ] Capacity from config; default 1000
+- [ ] Eviction is FIFO when capacity is exceeded
+- [ ] `metric_samples_since` honours timestamp filter and ordering
+- [ ] `unchanged_for` returns at least the latest sample if no change has occurred
+- [ ] Property test: capacity invariant holds after 10× capacity inserts
+
+---
+
+## BTH-23: `HealthProjection` + `CapabilityProjection`
+
+**Type** Task • **Priority** High • **Estimate** M • **Component** read_models
+**ADRs** R1 • **Blocked by** BTH-20 • **Blocks** BTH-25
+
+### Description
+Two projections, latest-only per `(subject, key)`.
+
+- `HealthProjection`: key = `(EntityRef, HealthTargetId)`.
+- `CapabilityProjection`: key = `(EntityRef, CapabilityName)`.
+
+### Acceptance criteria
+- [ ] Both projections implement `Projection`
+- [ ] Latest-write-wins by `observed_at`
+- [ ] Query methods return `Option<Projected<…>>` and a per-subject scan
+
+---
+
+## BTH-24: `HeartbeatProjection` + `IncidentSignalProjection`
+
+**Type** Task • **Priority** High • **Estimate** M • **Component** read_models
+**ADRs** R1, R3 §R3.4 • **Blocked by** BTH-5, BTH-20 • **Blocks** BTH-25
+
+### Description
+Two projections.
+
+`HeartbeatProjection`: sidecar-scoped, no key. Latest heartbeat + a
+bounded history `VecDeque` (default capacity 256).
+
+`IncidentSignalProjection`: key = `(EntityRef, SignalName)`. Stores
+latest signal per key; supports the three query methods on
+`IncidentSignalReadModel` (`current_signal`, `active_signals_for`,
+`active_signals_for_incident_kind`).
+
+### Acceptance criteria
+- [ ] Heartbeat ring honours capacity
+- [ ] `active_signals_for` returns only signals whose status is `Active`
+- [ ] `active_signals_for_incident_kind` cross-references the contributing
+      `IncidentSignalObservation` against `IncidentKind` (note: each
+      signal observation must carry enough context to map to kind —
+      verify with ADR-L1 §R1)
+
+---
+
+## BTH-25: `ReadModelStore` assembler + impl all six traits
+
+**Type** Story • **Priority** High • **Estimate** M • **Component** read_models
+**ADRs** R1, R3 • **Blocked by** BTH-21–24 • **Blocks** BTH-35
+
+### Description
+Add `src/read_models/store.rs` with the assembler:
+
+```rust
+pub struct ReadModelStore {
+    pub state:           StateProjection,
+    pub metric:          MetricProjection,
+    pub health:          HealthProjection,
+    pub capability:      CapabilityProjection,
+    pub heartbeat:       HeartbeatProjection,
+    pub incident_signal: IncidentSignalProjection,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ApplyError {
+    #[error("projection: {0}")] Projection(#[from] ProjectionError),
+}
+
+impl ReadModelStore {
+    pub fn new(config: ReadModelStoreConfig) -> Self;
+    pub fn apply(&mut self, obs: &Observation) -> Result<(), ApplyError>;
+}
+
+impl StateReadModel       for ReadModelStore { /* delegate to self.state */ }
+impl MetricReadModel      for ReadModelStore { /* delegate to self.metric */ }
+// … etc, six trait impls
+```
+
+`apply` dispatches by `ObservationPayload` variant; `Event`,
+`Inventory`, `Transition`, `Diagnosis` are no-ops in V0.
+
+### Acceptance criteria
+- [ ] All six read-model traits implemented and delegate to fields
+- [ ] `apply` dispatches per ADR-R1 §R1.4 / ADR-R3 §R3.3
+- [ ] Integration test: feed a sequence of observations, query all
+      read-model surfaces, verify correct values
+
+---
+
+# Phase 7 — Collector layer
+
+## BTH-26: Collector traits + `BatchSink` + sidecar_id on context
+
+**Type** Task • **Priority** High • **Estimate** M • **Component** collectors
+**ADRs** C1, C3 §C3.1 • **Blocked by** BTH-1 • **Blocks** BTH-28, BTH-34
+
+### Description
+Define the trait surface in `src/collectors/traits.rs` and extend
+`CollectionContext` with `sidecar_id`.
+
+```rust
+#[async_trait]
+pub trait PollingCollector: Send + Sync {
+    fn descriptor(&self) -> &CollectorDescriptor;
+    async fn poll(&self, ctx: CollectionContext) -> ObservationBatch;
+}
+
+#[async_trait]
+pub trait SubscriptionCollector: Send + Sync {
+    fn descriptor(&self) -> &CollectorDescriptor;
+    async fn run(&self, ctx: CollectionContext, sink: BatchSink)
+        -> Result<(), CollectionError>;
+}
+
+pub struct BatchSink { /* mpsc::Sender<ObservationBatch> */ }
+impl BatchSink {
+    pub async fn send(&self, batch: ObservationBatch) -> Result<(), SinkError>;
+}
+
+pub enum SinkError { Closed }
+```
+
+Update `CollectionContext`:
+```rust
+pub struct CollectionContext {
+    pub sidecar_id: SidecarId,           // NEW
+    pub collector_id: CollectorId,
+    pub target: CollectorTarget,
+    pub now: DateTime<Utc>,
+    pub run_id: CollectionRunId,
+}
+```
+
+### Acceptance criteria
+- [ ] Both traits compile, doc-commented
+- [ ] `CollectionContext` has the new field
+- [ ] Trait object compatibility verified (`Box<dyn PollingCollector>` compiles)
+- [ ] Test that `BatchSink::send` returns `SinkError::Closed` after rx drop
+
+---
+
+## BTH-27: `BitcoinRpcClient` + `RpcError`
+
+**Type** Task • **Priority** High • **Estimate** M • **Component** collectors
+**ADRs** C3 §C3.8 • **Blocked by** BTH-1 • **Blocks** BTH-28
+
+### Description
+Thin in-crate JSON-RPC wrapper over `reqwest::Client` in
+`src/collectors/bitcoin_core/rpc_client.rs`.
+
+Method coverage:
+- `get_blockchain_info() -> GetBlockchainInfoResponse`
+- `get_mempool_info() -> GetMempoolInfoResponse`
+- `get_network_info() -> GetNetworkInfoResponse`
+- `get_peer_info() -> GetPeerInfoResponse`
+
+Auth:
+- `BitcoinRpcAuth::UserPass`: HTTP basic
+- `BitcoinRpcAuth::CookieFile`: read file on each call (cache later)
+
+`RpcError`: variants per ADR-C3 §C3.8.
+
+Each call wrapped in `tokio::time::timeout(self.timeout, …)`.
+
+### Acceptance criteria
+- [ ] Four async methods, typed responses with serde
+- [ ] `RpcError` carries enough info to map to `CollectionErrorKind`
+- [ ] Integration test against a regtest Bitcoin Core (gated behind
+      a `BITHOUND_TEST_REGTEST_URL` env var so CI can skip it locally)
+- [ ] Timeout test: a slow mock server triggers `RpcError::Timeout`
+
+---
+
+## BTH-28: `BitcoinCoreRpcCollector`
+
+**Type** Story • **Priority** High • **Estimate** L • **Component** collectors
+**ADRs** C1, C2, C3 §§C3.2–C3.7 • **Blocked by** BTH-26, BTH-27 • **Blocks** BTH-36
+
+### Description
+First concrete `PollingCollector` impl in
+`src/collectors/bitcoin_core/rpc.rs`.
+
+Per poll:
+1. Call `get_blockchain_info` → `BitcoinBlockchainState` observation +
+   `bitcoin.rpc.getblockchaininfo` health Ok.
+2. Same for mempool, network, peer.
+3. On any RPC failure, return `ProbeResult::Failed` with the
+   `HealthCheckObservation`, the `CollectionError`, and
+   `partial_observations` accumulated so far.
+
+```rust
+pub struct BitcoinCoreRpcCollector {
+    descriptor: CollectorDescriptor,
+    client: BitcoinRpcClient,
+}
+
+impl BitcoinCoreRpcCollector {
+    pub fn new(descriptor: CollectorDescriptor,
+               connection: BitcoinNodeConnection,
+               http: reqwest::Client,
+               config: BitcoinCoreRpcCollectorConfig)
+        -> Result<Self, BuildError>;
+}
+
+pub struct BitcoinCoreRpcCollectorConfig {
+    pub timeout_per_rpc: Duration,    // default 5s
+}
+```
+
+### Acceptance criteria
+- [ ] `new` validates URL parses + auth shape, does NOT hit the network
+- [ ] Successful poll returns `ProbeResult::Ok` with 4 state + 4 health observations
+- [ ] First-RPC failure returns `Failed` with `partial_observations.len() == 0`
+- [ ] Third-RPC failure returns `Failed` with `partial_observations.len() == 4`
+      (state + health for the first two RPCs)
+- [ ] `RpcError → CollectionErrorKind` mapping per ADR-C3 §C3.8 verified
+- [ ] Integration test against regtest behind the env-var gate
+
+---
+
+# Phase 8 — Notifier sender implementations
+
+## BTH-29: Implement `WebhookSender`
+
+**Type** Task • **Priority** Medium • **Estimate** M • **Component** notifications
+**ADRs** — (replaces existing stub) • **Blocked by** BTH-1 • **Blocks** —
+
+### Description
+Replace the stub in `src/notifications/targets/webhook/sender.rs` with
+a real implementation. POST the rendered `WebhookPayload` JSON to
+`WebhookTarget.url` with the configured `headers`. Map HTTP outcomes
+to `DeliveryOutcome`:
+
+- 2xx → `Delivered { external_ref: None }`
+- 4xx (not 429) → `Permanent::BadRequest`
+- 401/403 → `Permanent::AuthFailure`
+- 410 → `Permanent::DestinationGone`
+- 429 → `Transient::RateLimited` with `retry_after` parsed from header
+- 5xx → `Transient::Upstream5xx`
+- Network error → `Transient::Network`
+
+### Acceptance criteria
+- [ ] All seven outcome paths covered by tests (use `wiremock` or
+      similar)
+- [ ] Custom headers from `WebhookTarget.headers` are sent
+- [ ] `SecretString` is never logged
+
+---
+
+## BTH-30: Implement `TelegramSender`
+
+**Type** Task • **Priority** Medium • **Estimate** M • **Component** notifications
+**ADRs** — • **Blocked by** BTH-1 • **Blocks** —
+
+### Description
+Replace the stub. Call `sendMessage` on the Telegram Bot API with the
+`TelegramTarget.chat_id`, the rendered text, and the configured
+`parse_mode`. Map outcomes:
+
+- `ok: true` → `Delivered { external_ref: Some(Telegram{chat_id, message_id}) }`
+- `error_code: 429` → `Transient::RateLimited` with `retry_after`
+- `error_code: 401/403` → `Permanent::AuthFailure` or
+  `Permanent::DestinationGone` (user blocked bot)
+- Other 4xx → `Permanent::BadRequest`
+- 5xx → `Transient::Upstream5xx`
+
+Can use the existing `teloxide` dependency or hand-rolled HTTP — pick
+whichever is smaller.
+
+### Acceptance criteria
+- [ ] Successful send returns `external_ref` with the real message_id
+- [ ] Rate limit response surfaces `retry_after`
+- [ ] All error variants exercised by tests
+
+---
+
+## BTH-31: Implement `DiscordSender`
+
+**Type** Task • **Priority** Medium • **Estimate** M • **Component** notifications
+**ADRs** — • **Blocked by** BTH-1 • **Blocks** —
+
+### Description
+Replace the stub. POST the rendered `DiscordPayload` JSON to the
+webhook URL (`DiscordTarget.webhook_url`). Map outcomes per ADR-L5 §L5.4
+spirit. On success, parse the response for `id` to populate
+`external_ref`.
+
+### Acceptance criteria
+- [ ] Successful send returns `external_ref: ExternalMessageRef::Discord`
+- [ ] Rate limit and 4xx/5xx paths exercised
+- [ ] Allowed mentions default to none (already in render)
+
+---
+
+# Phase 9 — Config
+
+## BTH-32: Config types + clap CLI
+
+**Type** Task • **Priority** High • **Estimate** M • **Component** config
+**ADRs** X1 §§X1.4, X1.9 • **Blocked by** BTH-1 • **Blocks** BTH-33
+
+### Description
+Add `src/config/` module tree (mod.rs + per-concern submodules per
+ADR-X1 §X1.9). Define the `serde::Deserialize` types matching the V0
+schema (§ X1.3). Define the `Cli` struct (`clap` derive).
+
+```rust
+// src/config/mod.rs
+pub struct Config {
+    pub sidecar: SidecarConfig,
+    pub storage: StorageConfig,
+    pub runtime: RuntimeConfig,
+    pub incidents: IncidentsConfig,
+    pub bitcoin_nodes: Vec<BitcoinNodeConfig>,
+    pub collectors: Vec<CollectorDescriptorConfig>,
+    pub notifications: NotificationsConfig,
+    pub notification_rules: Vec<NotificationRuleConfig>,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ConfigError {
+    #[error("io: {0}")] Io(#[from] std::io::Error),
+    #[error("toml parse: {0}")] Toml(#[from] toml::de::Error),
+    #[error("missing required env var: {0}")] MissingEnv(String),
+    #[error("invalid: {0}")] Invalid(String),
+    #[error("inline secret rejected at {0}")] InlineSecret(String),
+}
+```
+
+### Acceptance criteria
+- [ ] Types compile and deserialize a sample TOML (sample committed
+      under `examples/bithound.example.toml`)
+- [ ] `cli.rs` exposes `--config`, `--check-config`, `--version`
+- [ ] Sample TOML covers all V0 sections from § X1.3 of the spec
+- [ ] Parse failure surfaces a useful error pointing at the offending key
+
+---
+
+## BTH-33: TOML loading, env overrides, secrets resolution, validation
+
+**Type** Story • **Priority** High • **Estimate** L • **Component** config
+**ADRs** X1 §§X1.2, X1.5–X1.8 • **Blocked by** BTH-32 • **Blocks** BTH-36, BTH-37
+
+### Description
+Implement `Config::load_from_args_and_env()` per ADR-X1 §X1.8:
+
+1. Parse CLI.
+2. Resolve config path (`--config` → cwd → `/etc`).
+3. Read + parse TOML.
+4. Apply `BITHOUND_<SECTION>__<KEY>` env overrides (non-secret keys).
+5. Validate shape + cross-references (collectors reference existing nodes).
+6. Resolve `*_env` secrets into `SecretString` (existence check first).
+7. Read or generate `SidecarId` via `sidecar.id_file`.
+8. Open `SqlitePool` (run migrations).
+
+Inline secret rejection: any field named `*_password`, `*_token`,
+`*_secret` set to a non-`_env` value produces `InlineSecret`.
+
+### Acceptance criteria
+- [ ] All eight steps implemented; failure at any step exits with code 78
+- [ ] Test: missing config file at all default paths fails cleanly
+- [ ] Test: cross-reference error (collector targets nonexistent node)
+- [ ] Test: env override changes a non-secret key
+- [ ] Test: missing env var for a `_env`-suffixed field fails
+- [ ] Test: inline `password = "foo"` returns `InlineSecret`
+- [ ] Test: sidecar.id_file is generated on first run and reused thereafter
+- [ ] `--check-config` prints the merged config with secrets redacted, exits 0
+
+---
+
+# Phase 10 — Runtime
+
+## BTH-34: Collector supervisor module
+
+**Type** Task • **Priority** High • **Estimate** M • **Component** runtime
+**ADRs** S1, S3 §§S3.3–S3.4 • **Blocked by** BTH-26 • **Blocks** BTH-37
+
+### Description
+Add `src/runtime/supervisor.rs`. Spawns one tokio task per polling
+collector and one per subscription collector. Polling tasks tick on
+`tokio::time::interval(descriptor.integration.interval())`, call `poll`,
+and send the batch through the mpsc channel.
+
+Implements the respawn-with-backoff policy from ADR-S3 §S3.4:
+`10s, 30s, 60s, 300s` cap; reset after 5 minutes of clean run.
+
+Subscribes to a `broadcast::Receiver<()>` shutdown signal; selects
+against it inside the loop to exit cleanly.
+
+### Acceptance criteria
+- [ ] Polling task ticks at the configured interval
+- [ ] Crashed collector task is respawned per the backoff schedule
+- [ ] Shutdown signal causes all collector tasks to exit within 5s
+- [ ] Subscription collector `Err` return triggers respawn with backoff
+
+---
+
+## BTH-35: Pipeline consumer module
+
+**Type** Story • **Priority** High • **Estimate** L • **Component** runtime
+**ADRs** S1, S2, S3 §S3.8, **D4** • **Blocked by** BTH-11, BTH-12, BTH-19, BTH-25, BTH-26 • **Blocks** BTH-37
+
+### Description
+
+**Re-scoped by ADR-D4.** The consumer now pattern-matches the engine's
+`Vec<IncidentEvent>` to perform side effects, instead of reading
+`HandleOutcome` fields.
+
+Add `src/runtime/consumer.rs`. The central consumer task per ADR-S1.
+
+```rust
+pub async fn run(
+    mut rx: mpsc::Receiver<ObservationBatch>,
+    rules: Vec<Box<dyn DiagnosticRule>>,
+    mut read_models: ReadModelStore,
+    mut engine: IncidentEngine,
+    notifier: Notifier,
+    observation_store: Arc<dyn ObservationStore>,
+    incident_repo: Arc<dyn IncidentRepository>,
+    mut shutdown: broadcast::Receiver<()>,
+);
+```
+
+Per batch: append to observation store, apply to read models, build
+`DiagnosticContext` from the batch's subject, evaluate every rule,
+hand each (unvalidated) draft to the engine, then pattern-match the
+returned `Vec<IncidentEvent>`:
+
+```rust
+for event in engine.handle(IncidentCommand::RecordSignal(draft), now)? {
+    match event {
+        IncidentEvent::SignalRecorded(obs)  => { observation_store.append(&obs).await?; read_models.apply(&obs)?; }
+        IncidentEvent::IncidentTouched(inc) => incident_repo.save(&inc).await?,
+        IncidentEvent::Lifecycle(ev)        => notifier.dispatch(&ev, &compose(&ev)).await,
+        IncidentEvent::DraftRejected{…}     => tracing::warn!(…),
+        IncidentEvent::DraftBelowConfidenceFloor{…} => tracing::debug!(…),
+    }
+}
+```
+
+Rule errors logged and skipped (ADR-S2). Repo write failures retried
+with backoff per ADR-L4 §L4.4.
+
+### Acceptance criteria
+- [ ] Integration test feeds a batch, asserts: observation appended,
+      read models updated, rules invoked, no incident events emitted
+      (empty rules vec)
+- [ ] With a stub rule that always emits a single Active draft, the
+      consumer sees `[SignalRecorded, IncidentTouched, Lifecycle(Opened)]`
+      in order; the notifier sees the Opened lifecycle event
+- [ ] Rule panic isolated — next rule still runs
+- [ ] Repo save failure on `IncidentTouched` triggers retry;
+      exhaust = log + skip
+- [ ] Shutdown drains remaining batches then exits
+- [ ] Test asserts that events within a single command are processed
+      in the order the engine emits them (per ADR-D4 event-ordering
+      invariant)
+
+---
+
+## BTH-36: Bootstrap module — build collectors from config
+
+**Type** Task • **Priority** High • **Estimate** M • **Component** runtime
+**ADRs** S3 §§S3.7, C3 §C3.2 • **Blocked by** BTH-28, BTH-33 • **Blocks** BTH-37
+
+### Description
+Add `src/runtime/bootstrap.rs` with two functions:
+
+```rust
+pub fn build_polling_collectors(
+    collector_configs: &[CollectorDescriptorConfig],
+    registry: &NodeRegistry,
+    http: &reqwest::Client,
+) -> Result<Vec<Box<dyn PollingCollector>>, BuildError>;
+
+pub fn build_subscription_collectors(
+    collector_configs: &[CollectorDescriptorConfig],
+    registry: &NodeRegistry,
+    http: &reqwest::Client,
+) -> Result<Vec<Box<dyn SubscriptionCollector>>, BuildError>;
+```
+
+V0: only `IntegrationKind::BitcoinCoreRpc` is handled; other variants
+return `BuildError::NotImplemented` with a clear message.
+
+### Acceptance criteria
+- [ ] Build a `BitcoinCoreRpcCollector` from a descriptor that
+      references an existing node
+- [ ] Bad target reference returns `BuildError::TargetNotFound`
+- [ ] Subscription variants return `BuildError::NotImplemented`
+
+---
+
+## BTH-37: `runtime::run()` + `main.rs` bootstrap
+
+**Type** Story • **Priority** High • **Estimate** M • **Component** runtime
+**ADRs** S1, S3 §§S3.3, S3.7 • **Blocked by** BTH-13, BTH-33, BTH-34, BTH-35, BTH-36, BTH-25 • **Blocks** BTH-38, BTH-40
+
+### Description
+Tie everything together.
+
+`src/runtime/mod.rs`:
+```rust
+pub async fn run(deps: RuntimeDeps) -> Result<(), RuntimeError>;
+
+pub struct RuntimeDeps {
+    pub sidecar_id: SidecarId,
+    pub polling_collectors: Vec<Box<dyn PollingCollector>>,
+    pub subscription_collectors: Vec<Box<dyn SubscriptionCollector>>,
+    pub rules: Vec<Box<dyn DiagnosticRule>>,
+    pub read_models: ReadModelStore,
+    pub engine: IncidentEngine,
+    pub notifier: Notifier,
+    pub observation_store: Arc<dyn ObservationStore>,
+    pub incident_repo: Arc<dyn IncidentRepository>,
+    pub config: RuntimeConfig,
+}
+```
+
+`run` wires the mpsc channel, spawns the supervisor and consumer
+tasks, awaits SIGINT/SIGTERM (ADR-S3 §S3.3), broadcasts shutdown,
+joins with a 30s deadline.
+
+`src/main.rs` becomes the bootstrap per ADR-S3 §S3.7.
+
+### Acceptance criteria
+- [ ] `cargo run -- --config examples/bithound.example.toml` starts
+      and runs against a regtest node
+- [ ] Sends SIGINT → clean shutdown within 5s
+- [ ] No `println!` left in `main.rs`; tracing-subscriber set up
+- [ ] Sidecar prints its `SidecarId` and the loaded collector descriptors
+      at startup (info-level tracing)
+
+---
+
+# Phase 11 — First diagnostic rules
+
+## BTH-38: `BitcoinTipLagRule` (catalog A1)
+
+**Type** Story • **Priority** Medium • **Estimate** M • **Component** rules
+**ADRs** L2 §L2.1 ; catalog A1 • **Blocked by** BTH-19, BTH-25, BTH-37 • **Blocks** BTH-40
+
+### Description
+Implement the first diagnostic rule. Triggers on the A1 pattern:
+`initialblockdownload == true` AND `headers - blocks < 1000` AND
+`verificationprogress > 0.999` AND `peer_count >= 8` AND tip time is
+recent but `initialblockdownload` hasn't cleared.
+
+Lives in `src/diagnostics/rules/bitcoin/tip_lag.rs`. Implements
+`DiagnosticRule`. Reads from `ctx.state` (BitcoinBlockchain and
+BitcoinPeerSummary) using the `StateReadModelExt` helpers.
+
+Hysteresis (rule-owned per ADR-L2 §L2.1): require the condition to
+hold across two consecutive observations.
+
+### Acceptance criteria
+- [ ] Active draft emitted when the A1 pattern is satisfied for 2 consecutive ticks
+- [ ] Cleared draft emitted when any condition is broken for 2 consecutive ticks
+- [ ] Test: single-tick A1 doesn't open an incident (debounce)
+- [ ] Test: clearing path closes the incident with `Resolved`
+- [ ] `kind` and `dimension` set per ADR-L1; subject = `EntityRef::BitcoinNode`
+
+---
+
+## BTH-39: `BitcoinPeerStarvationRule` (catalog A3)
+
+**Type** Story • **Priority** Medium • **Estimate** M • **Component** rules
+**ADRs** L2 §L2.1 ; catalog A3 • **Blocked by** BTH-19, BTH-25, BTH-37 • **Blocks** BTH-40
+
+### Description
+Triggers on A3: `getnetworkinfo.connections_out < 8` AND
+`networkactive == true` AND condition has held for ≥ 30 minutes.
+Severity escalates from Warning to Critical if tip is also stale
+(no new blocks for 30+ minutes).
+
+Lives in `src/diagnostics/rules/bitcoin/peer_starvation.rs`. Reads
+BitcoinNetwork state + BitcoinPeerSummary + last-block timestamp from
+BitcoinBlockchain state.
+
+### Acceptance criteria
+- [ ] Test: Warning draft after 30 min of low outbound count
+- [ ] Test: severity escalates to Critical after 30 min of stale tip
+- [ ] Test: cleared when outbound count recovers
+- [ ] No drafts emitted when `networkactive == false` (operator disabled networking)
+
+---
+
+# Phase 12 — End-to-end & docs
+
+## BTH-40: End-to-end integration test (regtest)
+
+**Type** Story • **Priority** High • **Estimate** L • **Component** test
+**ADRs** — • **Blocked by** BTH-37, BTH-38, BTH-39 • **Blocks** BTH-41
+
+### Description
+Integration test under `tests/` that:
+
+1. Spawns a Bitcoin Core regtest node (via `bitcoind` binary or test
+   docker image; document the prerequisite).
+2. Writes a `bithound.toml` pointing at it.
+3. Spawns `bithound` as a child process.
+4. Forces a tip-lag condition (stop bitcoind for 13h is impractical;
+   instead inject the condition via mocking the RPC client in a
+   dedicated test path — OR use a regtest fixture that satisfies the
+   IBD edge case).
+5. Asserts that a webhook test endpoint receives an Opened event
+   matching the A1 fingerprint.
+
+Mark the test `#[ignore]` and gate it on `BITHOUND_TEST_REGTEST` env var
+so CI doesn't run it locally without bitcoind.
+
+### Acceptance criteria
+- [ ] Test passes locally with bitcoind in PATH
+- [ ] Failure produces a clear log of what was expected vs received
+- [ ] Documented in `tests/README.md` how to run
+
+---
+
+## BTH-41: README + operator docs update
+
+**Type** Task • **Priority** Medium • **Estimate** M • **Component** docs
+**ADRs** — • **Blocked by** BTH-40 • **Blocks** —
+
+### Description
+Update `README.md` and add `docs/OPERATOR_GUIDE.md` covering:
+
+- What V0 does (and what it doesn't).
+- How to install (cargo install / docker / binary).
+- How to write `bithound.toml`.
+- How to set up Bitcoin Core for RPC access (user, password, cookie).
+- How to set up Telegram / Discord / webhook notifications.
+- How to interpret the two V0 diagnostic rules (link to catalog).
+- Where logs and the DB file live.
+- Troubleshooting (common config errors, exit code 78 meaning).
+
+Also: rewrite the existing `docs/INCIDENT_CATALOG.md` cross-references
+to point at the implemented rules (BTH-38, BTH-39).
+
+### Acceptance criteria
+- [ ] README has a "Quick start" section that works for a fresh user
+- [ ] `OPERATOR_GUIDE.md` covers all sections above
+- [ ] Catalog A1 and A3 entries link to their rule modules
+- [ ] No "TBD" or "TODO" left in user-facing docs
+
+---
+
+# Phase D — Domain refinement (DMMF alignment)
+
+Eight tickets aligning Bithound's type system with Wlaschin's
+"Domain Modeling Made Functional" patterns. ADRs D1–D4.
+
+## BTH-42: Smart-constructor scaffolding (`parse_dotted_name`)
+
+**Type** Task • **Priority** High • **Estimate** S • **Component** shared
+**ADRs** **D2** • **Blocked by** — • **Blocks** BTH-43, BTH-44, BTH-45, BTH-46
+
+### Description
+
+Add `src/shared/parse.rs` with the shared dotted-namespace parser and
+error type. No newtypes migrated yet — that's BTH-43 onward.
+
+```rust
+// src/shared/parse.rs
+pub fn parse_dotted_name(s: &str) -> Result<String, ParseDottedNameError>;
+
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub enum ParseDottedNameError {
+    #[error("name is empty")] Empty,
+    #[error("name exceeds 128 characters (got {got})")] TooLong { got: usize },
+    #[error("invalid character {found:?} at position {at}")] BadCharacter { at: usize, found: char },
+    #[error("empty segment at position {at}")] EmptySegment { at: usize },
+    #[error("segment at position {at} must start with a-z")] BadSegmentStart { at: usize },
+    #[error("name must contain at least one dot")] NoDot,
+}
+```
+
+### Acceptance criteria
+- [ ] `parse_dotted_name` accepts `"bitcoin.tip_lag"`, `"lnd.channel.inactive"`, `"host.disk.exhaustion"`, `"sidecar.collector.run_started"`
+- [ ] Rejects: `"tip_lag"` (NoDot), `"BitcoinTipLag"` (BadCharacter), `"bitcoin..tip_lag"` (EmptySegment), `"1bitcoin.x"` (BadSegmentStart), `"bitcoin.tip-lag"` (BadCharacter), `""` (Empty), 129-char string (TooLong)
+- [ ] Each error variant exercised by a named unit test
+- [ ] Doc-comment explains the grammar with examples
+
+---
+
+## BTH-43: Migrate `IncidentKind` to smart constructor
+
+**Type** Task • **Priority** High • **Estimate** S • **Component** incidents
+**ADRs** **D2** • **Blocked by** BTH-42 • **Blocks** BTH-47
+
+### Description
+
+Migrate `IncidentKind` from `pub struct IncidentKind(pub String)` to
+the smart-constructor form. Update all call sites (well_known
+references, tests).
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct IncidentKind(String);
+
+impl IncidentKind {
+    pub fn parse(s: impl AsRef<str>) -> Result<Self, ParseDottedNameError> { … }
+    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn from_well_known(s: &'static str) -> Self { … }   // debug-asserts validity
+}
+
+impl AsRef<str> for IncidentKind { … }
+impl std::fmt::Display for IncidentKind { … }
+impl TryFrom<String> for IncidentKind { … }
+impl From<IncidentKind> for String { … }
+```
+
+### Acceptance criteria
+- [ ] Inner field is private
+- [ ] `parse` returns `ParseDottedNameError` on invalid input
+- [ ] `from_well_known` debug-asserts via `parse_dotted_name`; release builds skip the check
+- [ ] Serde round-trips through string; deserialization re-validates (test asserts invalid JSON string fails)
+- [ ] All existing call sites compile (`well_known` references migrated)
+- [ ] Test: parity between `well_known::*` constants and `IncidentKind::from_well_known` for every canonical kind
+
+---
+
+## BTH-44: Migrate `MetricName` and `SignalName`
+
+**Type** Task • **Priority** High • **Estimate** S • **Component** observations
+**ADRs** **D2** • **Blocked by** BTH-42 • **Blocks** BTH-46
+
+### Description
+
+Same shape as BTH-43, applied to `MetricName` and `SignalName`. Both
+gain `parse`, `as_str`, `AsRef<str>`, `Display`, serde round-trip with
+re-validation, and `from_well_known` fast path.
+
+### Acceptance criteria
+- [ ] Same shape as BTH-43 for both newtypes
+- [ ] Existing call sites compile
+- [ ] Serde re-validation test per type
+
+---
+
+## BTH-45: Migrate `StateName` and `CapabilityName`
+
+**Type** Task • **Priority** High • **Estimate** S • **Component** observations
+**ADRs** **D2** • **Blocked by** BTH-42 • **Blocks** BTH-46
+
+### Description
+
+Same shape as BTH-43, applied to `StateName` and `CapabilityName`.
+`StateName::from_well_known` is exercised by `StateObservation::name()`
+(BTH-6 — already shipped) and the parity test in `state.rs`.
+
+### Acceptance criteria
+- [ ] Same shape as BTH-43 for both newtypes
+- [ ] BTH-6's parity test still passes (now via `from_well_known`)
+- [ ] Existing call sites compile
+
+---
+
+## BTH-46: Migrate remaining name newtypes; remove compat helpers
+
+**Type** Task • **Priority** Medium • **Estimate** M • **Component** observations
+**ADRs** **D2** • **Blocked by** BTH-43, BTH-44, BTH-45 • **Blocks** —
+
+### Description
+
+Migrate the remaining five name newtypes: `HealthTargetId`,
+`EventName`, `TransitionName`, `InventoryName`, `DiagnosisName`.
+Remove any compatibility helpers (e.g. `From<String>` on the public
+constructor) added during BTH-42 — at this point all call sites have
+migrated.
+
+### Acceptance criteria
+- [ ] All five remaining newtypes match the BTH-43 template
+- [ ] No `pub` inner-field constructors remain for the ten name newtypes
+- [ ] `cargo clippy -- -D warnings` clean
+
+---
+
+## BTH-47: Unvalidated/Validated draft split + `KindRegistry::validate`
+
+**Type** Story • **Priority** High • **Estimate** M • **Component** diagnostics + incidents
+**ADRs** **D1** • **Blocked by** BTH-4, BTH-15 • **Blocks** BTH-17 (re-scoped), BTH-19
+
+### Description
+
+Split `IncidentSignalDraft` into two distinct structs per ADR-D1:
+
+```rust
+// src/diagnostics/types.rs
+pub struct UnvalidatedIncidentSignalDraft {
+    pub subject: EntityRef, pub signal: SignalName,
+    pub kind: IncidentKind, pub dimension: Option<String>,
+    pub severity: SignalSeverity, pub status: SignalStatus,
+    pub confidence: Confidence, pub evidence: Vec<EvidenceRef>,
+}
+
+// src/incidents/kinds.rs
+pub struct ValidatedIncidentSignalDraft {
+    // same fields, but PRIVATE; constructed only via KindRegistry::validate
+    subject: EntityRef, signal: SignalName,
+    kind: IncidentKind, dimension: Option<String>,
+    severity: SignalSeverity, status: SignalStatus,
+    confidence: Confidence, evidence: Vec<EvidenceRef>,
+}
+
+impl ValidatedIncidentSignalDraft {
+    pub fn subject(&self) -> &EntityRef { … }
+    pub fn kind(&self) -> &IncidentKind { … }
+    // … per-field accessors
+}
+
+impl KindRegistry {
+    pub fn validate(&self, draft: UnvalidatedIncidentSignalDraft)
+        -> Result<ValidatedIncidentSignalDraft, DraftError>;
+}
+```
+
+Update `DiagnosticRule::evaluate` to return
+`Vec<UnvalidatedIncidentSignalDraft>`.
+
+### Acceptance criteria
+- [ ] Both structs defined; validated form has private fields and accessor methods only
+- [ ] `KindRegistry::validate` is the only public way to construct a `ValidatedIncidentSignalDraft`
+- [ ] `UnvalidatedIncidentSignalDraft` is `Serialize + Deserialize`
+- [ ] `ValidatedIncidentSignalDraft` is `Serialize` but **not** `Deserialize` (test asserts the trait isn't implemented)
+- [ ] `DiagnosticRule::evaluate` signature updated; existing rules (none yet) would compile
+- [ ] Test matrix: validate succeeds for valid drafts; returns `DraftError::UnknownKind`, `DisallowedSubject`, `DimensionRequired`, `DimensionForbidden` as appropriate
+
+---
+
+## BTH-48: Promote `ActorId`; extend `IncidentCommand` with stubs
+
+**Type** Task • **Priority** Medium • **Estimate** S • **Component** incidents + shared
+**ADRs** **D3** • **Blocked by** BTH-2 • **Blocks** BTH-17 (re-scoped)
+
+### Description
+
+1. Add `ActorId` to `src/shared/types.rs`:
+   ```rust
+   pub struct ActorId(pub String);
+   impl ActorId {
+       pub fn system() -> Self { Self("system".into()) }
+       pub fn operator(name: impl Into<String>) -> Self { Self(name.into()) }
+   }
+   ```
+2. Extend `IncidentCommand` per ADR-D3:
+   ```rust
+   pub enum IncidentCommand {
+       RecordSignal(UnvalidatedIncidentSignalDraft),
+       Acknowledge { id: IncidentId, by: ActorId, at: DateTime<Utc> },
+       Resolve     { id: IncidentId, by: ActorId, at: DateTime<Utc>, reason: String },
+   }
+   ```
+3. Extend `EngineError` with `NotYetImplemented(&'static str)` variant.
+
+### Acceptance criteria
+- [ ] `ActorId` in `src/shared/types.rs` with `system()` and `operator()`
+- [ ] `IncidentCommand` has three variants
+- [ ] `EngineError::NotYetImplemented` defined
+- [ ] Serde round-trip test for `ActorId`
+
+---
+
+## BTH-49: `SuppressionCommand` + `SuppressionService` trait
+
+**Type** Task • **Priority** Low • **Estimate** S • **Component** incidents
+**ADRs** **D3**, L5 • **Blocked by** BTH-48 • **Blocks** —
+
+### Description
+
+Add the separate suppression command vocabulary in
+`src/incidents/suppression.rs`:
+
+```rust
+pub enum SuppressionCommand {
+    Suppress {
+        fingerprint: IncidentFingerprint,
+        until: Option<DateTime<Utc>>,
+        by: ActorId,
+        reason: String,
+    },
+    Unsuppress { fingerprint: IncidentFingerprint, by: ActorId },
+}
+
+#[async_trait]
+pub trait SuppressionService: Send + Sync {
+    async fn handle(&self, cmd: SuppressionCommand, now: DateTime<Utc>)
+        -> Result<(), SuppressionError>;
+}
+
+pub enum SuppressionError {
+    NotYetImplemented(&'static str),
+    Repository(RepoError),
+}
+```
+
+V0/V0.1 ships no concrete `SuppressionService` impl; the trait stub is
+forward-compat for V0.2.
+
+### Acceptance criteria
+- [ ] Both types + trait defined and doc-commented
+- [ ] `SuppressionError` derives `Debug`
+- [ ] No concrete impl required (this ticket is types-only)
+
+---
+
+## BTH-50: Per-context `events.rs` modules + `DomainEvent` envelope
+
+**Type** Story • **Priority** Medium • **Estimate** M • **Component** all domain contexts
+**ADRs** **D4** • **Blocked by** BTH-5, BTH-17 (re-scoped) • **Blocks** —
+
+### Description
+
+Add per-context events modules per ADR-D4:
+
+- `src/observations/events.rs` — `ObservationEvent::{BatchProduced, ObservationAppended}`.
+- `src/read_models/events.rs` — `ReadModelEvent::Applied`.
+- `src/diagnostics/events.rs` — `DiagnosticEvent::{DraftEmitted, RuleFailed}`.
+- `src/incidents/events.rs` — `IncidentEvent` (already defined by BTH-17; this ticket just declares the module is present and exported).
+- `src/notifications/events.rs` — `NotificationEvent::{Dispatched, Suppressed}`.
+
+Plus the top-level envelope:
+
+```rust
+// src/domain_events.rs
+pub enum DomainEvent {
+    Observation(ObservationEvent),
+    ReadModel(ReadModelEvent),
+    Diagnostic(DiagnosticEvent),
+    Incident(IncidentEvent),
+    Notification(NotificationEvent),
+}
+```
+
+V0 doesn't dispatch on an event bus — the enums are type-level
+documentation for what crosses context boundaries, used for tracing
+and (later) cloud sync.
+
+### Acceptance criteria
+- [ ] All five per-context events modules present and `pub`
+- [ ] Top-level `DomainEvent` envelope defined with `From<T>` impls for each variant
+- [ ] All events derive `Debug + Clone + Serialize` (cloud-sync-ready); `Deserialize` for round-trip
+- [ ] `cargo doc --no-deps` lists each events module
+- [ ] No runtime dispatch wired in this ticket — observation-only types
