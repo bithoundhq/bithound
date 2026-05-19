@@ -1,4 +1,4 @@
-//! Storage trait surfaces per ADR-P2.
+//! Storage trait surfaces.
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -8,10 +8,9 @@ use crate::observations::Observation;
 
 /// Append-only store for [`Observation`] facts.
 ///
-/// Per ADR-P2 §P2.1: V0 ships the full surface (append + iter). The trait is
-/// kept minimal — single mutation method (`append_many`) plus a streaming
-/// read (`iter_since`) used by V0.1+ read-model replay (ADR-R3 §R3.5 /
-/// ADR-S3 §S3.7).
+/// V0 ships the full surface (append + iter). The trait is kept minimal —
+/// single mutation method (`append_many`) plus a streaming read
+/// (`iter_since`) used by V0.1+ read-model replay.
 ///
 /// Concrete impls (`SqliteObservationStore`, `MemoryObservationStore`) live
 /// under `storage::sqlite` and `storage::memory`.
@@ -48,9 +47,8 @@ pub enum StoreError {
 
     /// A stored row failed to deserialize into its domain type.
     ///
-    /// Per ADR-P2 §P2.8, corruption is logged and the offending row is
-    /// skipped at the call site; the database itself is treated as
-    /// authoritative.
+    /// Logged and skipped at the call site; the database itself is treated
+    /// as authoritative.
     #[error("corruption: {0}")]
     Corruption(String),
 
