@@ -1,4 +1,4 @@
-//! SQLite backend per ADR-P1.
+//! SQLite backend.
 
 use std::path::Path;
 
@@ -8,11 +8,6 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 ///
 /// Sets `journal_mode = WAL` and `synchronous = NORMAL`, then applies any
 /// pending migrations from `./migrations`. Idempotent on existing files.
-///
-/// Per ADR-P1: WAL allows concurrent readers alongside the single writer
-/// established by ADR-S1; `synchronous = NORMAL` trades a small durability
-/// window for ~3-10x faster writes — acceptable because observations are
-/// re-derivable from collectors on the next tick.
 pub async fn open_pool(path: &Path) -> Result<SqlitePool, sqlx::Error> {
     let options = SqliteConnectOptions::new()
         .filename(path)

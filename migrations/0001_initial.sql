@@ -1,5 +1,5 @@
--- ADR-P1: SQLite backend via sqlx — initial schema.
--- STRICT (SQLite 3.37+) enforces column type rigor; no silent text-to-int coercion.
+-- Initial schema. STRICT (SQLite 3.37+) enforces column type rigor;
+-- no silent text-to-int coercion.
 
 CREATE TABLE observations (
     id              BLOB PRIMARY KEY,
