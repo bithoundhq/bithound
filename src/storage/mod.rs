@@ -5,3 +5,6 @@
 //! repository implementations live under [`sqlite`].
 
 pub mod sqlite;
+pub mod traits;
+
+pub use traits::{ObservationStore, StoreError};
