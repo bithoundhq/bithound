@@ -18,19 +18,24 @@ bugs, they're types defined ahead of the runtime that will use them.
 
 Before doing architecture-affecting work, read in this order:
 
-1. **`SPEC.md`** — the domain spec plus 18 accepted ADRs (001, L1–L5, R1–R3, C1–C3,
-   S1–S3, P1, P2, X1). Every architectural decision is captured here. **Code that
-   contradicts an ADR must be rejected** (the PR should reference the ADR first).
-2. **`IMPLEMENTATION_PLAN.md`** — phase structure, dependency graph, milestones,
+1. **`SPEC.md`** — the domain spec (§§ 1–22). The ADRs themselves live under
+   `docs/src/adr/` (rendered by the mdBook site); `SPEC.md` § 23 is now a
+   pointer into that tree. **Code that contradicts an ADR must be rejected**
+   (the PR should reference the ADR first).
+2. **`docs/src/adr/`** — the canonical home for all ADRs. Start at
+   `docs/src/adr/index.md` for the clustered index (001, L1–L5, R1–R3, C1–C3,
+   S1–S3, P1–P3, X1, D1–D4, N1–N2, A1).
+3. **`IMPLEMENTATION_PLAN.md`** — phase structure, dependency graph, milestones,
    estimates, project-wide conventions.
-3. **`TICKETS.md`** — 41 BTH-N tickets in JIRA shape. Each ticket lists the ADRs it
+4. **`TICKETS.md`** — 41 BTH-N tickets in JIRA shape. Each ticket lists the ADRs it
    implements, acceptance criteria, and `Blocked by` / `Blocks` links.
-4. **`docs/INCIDENT_CATALOG.md`** — the diagnostic backlog. ~17 documented Bitcoin /
+5. **`docs/INCIDENT_CATALOG.md`** — the diagnostic backlog. ~17 documented Bitcoin /
    LND / Elements incident patterns that future rules will detect. The terminology
    here (symptom / signals / diagnosis / action / look-alikes) is intentional.
 
-When a ticket forces a decision the ADRs don't cover, **stop and append a new ADR**
-to `SPEC.md` § 23 before coding. Don't extend the architecture by precedent.
+When a ticket forces a decision the ADRs don't cover, **stop and write a new ADR**
+under `docs/src/adr/` before coding, then link it from `docs/src/adr/index.md`
+and `docs/src/SUMMARY.md`. Don't extend the architecture by precedent.
 
 ## Workflow conventions
 
