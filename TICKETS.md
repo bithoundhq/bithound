@@ -66,11 +66,29 @@ Estimate {S = ½–1 day, M = 1–2 days, L = 3–5 days}.
 | BTH-48| Promote `ActorId`; extend `IncidentCommand` (Ack/Resolve stubs)| D     | S        |
 | BTH-49| `SuppressionCommand` + `SuppressionService` trait              | D     | S        |
 | BTH-50| Per-context `events.rs` modules + top-level `DomainEvent`      | D     | M        |
+| BTH-51| `NotificationAttemptRepository` trait + revised `NotificationAttempt` + memory impl | 3 | S |
+| BTH-52| `SqliteNotificationAttemptRepository` + amend `0001_initial.sql` with `notification_attempts` table | 3 | M |
+| BTH-53| (V0.1) Retry scheduler + backoff defaults in the notification worker | V0.1 | M |
+| BTH-54| Identity refinements — `EntityRef::Sidecar` + sub-entity scoping (ADR-N1) | 1 | S |
+| BTH-55| Notification worker task (ADR-N2) — dispatch out of consumer | 10 | M |
+| BTH-56| axum HTTP server bootstrap + graceful shutdown (ADR-A1) | A | S |
+| BTH-57| V0 operator API endpoints (`/health`, `/incidents/open`, `/incidents/:id`, `/incidents/:id/evidence`) | A | M |
+| BTH-58| `BitcoinRpcUnreachableRule` + `bitcoin.rpc_unreachable` kind | 11 | S |
 
 **Re-scopes from D-cluster (ADR-D4 supersedes ADR-L4 §L4.2):**
 - BTH-17 — was "IncidentCommand + HandleOutcome + EngineError"; now defines `IncidentEvent` (no `HandleOutcome`).
 - BTH-19 — was "engine handle decision tree returning HandleOutcome"; now returns `Vec<IncidentEvent>`.
-- BTH-35 — was "consumer reads outcome fields"; now consumer pattern-matches events.
+- BTH-35 — was "consumer reads outcome fields + dispatches"; now consumer pattern-matches events AND ends at "enqueue notification" (dispatch moves to BTH-55 per ADR-N2).
+
+**Re-scopes from ADR-P3 (notification attempts persistence):**
+- BTH-13 — retention task gains `attempts_max_age` knob and a fourth `DELETE` in the sweep.
+
+**Re-scopes from architecture review (ADR-N1, ADR-N2, ADR-A1, ADR-P3 audit-only revision):**
+- BTH-38 — rule renamed to `BitcoinTipLagOrIbdStalledRule` implementing `bitcoin.tip_lag_or_ibd_stalled` (combines catalog A1 + A2).
+- BTH-39 — rule renamed to `BitcoinNoPeersRule` implementing `bitcoin.no_peers` (zero outbound peers; tighter than catalog A3 which was <8).
+- BTH-29/30/31 — V0 needs at most one sender. **Webhook (BTH-29)** is the V0 target; Telegram (BTH-30) and Discord (BTH-31) move to V0.1.
+- BTH-53 — **moved to V0.1.** Retry scheduler lands in the notification worker, not the consumer (per ADR-N2 §N2.5).
+- New tickets BTH-54..BTH-58 added per the architecture review.
 
 **GitHub issue numbering note (BTH-42 onwards):** the BTH-N → GitHub
 issue-#N mapping holds for BTH-1 through BTH-41. From BTH-42 onwards
@@ -88,6 +106,18 @@ when the D-cluster issues were created:
 | BTH-48 | #55          |
 | BTH-49 | #56          |
 | BTH-50 | #57          |
+| BTH-51 | #63          |
+| BTH-52 | #64          |
+| BTH-53 | #65          |
+| BTH-54 | #67          |
+| BTH-55 | #68          |
+| BTH-56 | #69          |
+| BTH-57 | #70          |
+| BTH-58 | #71          |
+
+(PRs #58–#62 consumed the matching numbers when ADR-D4 docs / BTH-7 /
+BTH-8 / BTH-4-recover / CLAUDE.md-gotcha landed. PR #66 consumed when
+ADR-P3 docs landed.)
 
 Issue bodies use the GitHub numbers (e.g. "Blocked by: #49 (BTH-42)")
 so cross-references resolve via GitHub autolinking.
@@ -1788,3 +1818,377 @@ and (later) cloud sync.
 - [ ] All events derive `Debug + Clone + Serialize` (cloud-sync-ready); `Deserialize` for round-trip
 - [ ] `cargo doc --no-deps` lists each events module
 - [ ] No runtime dispatch wired in this ticket — observation-only types
+
+---
+
+# Phase 3 (continued) — Notification attempts persistence
+
+Per ADR-P3. Three new tickets and one re-scope on BTH-13.
+
+## BTH-51: `NotificationAttemptRepository` trait + revised `NotificationAttempt` + memory impl
+
+**Type** Task • **Priority** High • **Estimate** S • **Component** notifications + storage
+**ADRs** **P3** (§§P3.3, P3.4) • **Blocked by** #1 • **Blocks** #64 (BTH-52), #65 (BTH-53)
+
+### Description
+
+Add `src/notifications/repository.rs` with the trait and revise the existing `NotificationAttempt` struct to carry retry state.
+
+```rust
+// src/notifications/repository.rs
+#[async_trait]
+pub trait NotificationAttemptRepository: Send + Sync {
+    async fn insert_pending(&self, attempt: &NotificationAttempt) -> Result<(), RepoError>;
+    async fn complete(
+        &self,
+        id: &NotificationAttemptId,
+        receipt: DeliveryReceipt,
+        next_retry_at: Option<DateTime<Utc>>,
+    ) -> Result<(), RepoError>;
+    async fn list_retryable(
+        &self,
+        now: DateTime<Utc>,
+        limit: u32,
+    ) -> Result<Vec<NotificationAttempt>, RepoError>;
+    async fn list_for_incident(
+        &self,
+        incident_id: &IncidentId,
+    ) -> Result<Vec<NotificationAttempt>, RepoError>;
+}
+```
+
+Revise `NotificationAttempt`:
+
+- Remove `incident_lifecycle_event: IncidentLifecycleEvent` (duplicates incidents rows).
+- Remove `target: NotificationTarget` (carries `SecretString` — must not be persisted).
+- Add `incident_id: IncidentId`, `lifecycle_kind: IncidentNotificationEventKind`.
+- Add `target_kind: TargetKind` (enum: Telegram/Discord/Webhook/Stdout) and `target_summary: String` (redacted).
+- Add `attempt_number: u32`, `parent_attempt_id: Option<NotificationAttemptId>`, `next_retry_at: Option<DateTime<Utc>>`.
+- Replace `error: Option<String>` with `outcome: Option<DeliveryOutcome>` + `external_ref: Option<ExternalMessageRef>`.
+
+Expand `NotificationDeliveryStatus`: `Pending`, `Succeeded`, `FailedTransient`, `FailedPermanent`, `Suppressed`.
+
+Add `MemoryNotificationAttemptRepository` (test impl) under `src/storage/memory/`.
+
+### Acceptance criteria
+
+- [ ] Trait + revised struct + `TargetKind` enum compile with doc-comments
+- [ ] `MemoryNotificationAttemptRepository` implements the trait
+- [ ] Trait conformance test suite shared with the SQLite impl
+- [ ] Round-trip test: insert pending, complete, list_retryable returns the row when `next_retry_at <= now`, doesn't return it when `now < next_retry_at`
+- [ ] `target_summary` redaction sketches: `telegram:chat_id=N`, `discord:webhook=host=H`, `webhook:host=H`, `stdout`
+
+---
+
+## BTH-52: `SqliteNotificationAttemptRepository` + schema amendment
+
+**Type** Task • **Priority** High • **Estimate** M • **Component** storage
+**ADRs** **P3** (§§P3.2, P3.3) • **Blocked by** #9 (BTH-9), #63 (BTH-51) • **Blocks** #65 (BTH-53)
+
+### Description
+
+Amend `migrations/0001_initial.sql` with the `notification_attempts` table (per ADR-P3 §P3.2 DDL) and add `SqliteNotificationAttemptRepository` in `src/storage/sqlite/notification_attempt_repository.rs`.
+
+Implement:
+- `insert_pending`: INSERT with all retry-state columns.
+- `complete`: UPDATE the row from `Pending` to a terminal status; set `next_retry_at` per the passed value.
+- `list_retryable`: SELECT WHERE `status = 'FailedTransient' AND next_retry_at <= ?` ORDER BY `next_retry_at` LIMIT `?`.
+- `list_for_incident`: SELECT WHERE `incident_id = ?` ORDER BY `attempted_at DESC`.
+
+### Acceptance criteria
+
+- [ ] `notification_attempts` table created with all columns + 4 indexes per ADR-P3 §P3.2
+- [ ] `STRICT` keyword present
+- [ ] Trait conformance suite (from BTH-51) passes
+- [ ] Round-trip test for every `DeliveryOutcome` variant via `outcome_json`
+- [ ] `external_ref_json` round-trips through `ExternalMessageRef` for Telegram + Discord
+- [ ] Test: `list_retryable` is index-using (check with `EXPLAIN QUERY PLAN`)
+- [ ] Migration is idempotent (re-running the migrate step doesn't fail)
+
+---
+
+## BTH-53: Retry scheduler + `Notifier::dispatch` signature change + backoff defaults
+
+**Type** Story • **Priority** High • **Estimate** M • **Component** runtime + notifications
+**ADRs** **P3** (§§P3.5, P3.6, P3.7, P3.8, P3.9, P3.10) • **Blocked by** #63 (BTH-51), #64 (BTH-52), #35 (BTH-35) • **Blocks** —
+
+### Description
+
+Three coordinated changes:
+
+1. **`Notifier::dispatch` signature change** (ADR-P3 §P3.10):
+   ```rust
+   pub async fn dispatch(
+       &self,
+       event: &IncidentLifecycleEvent,
+       message: &NotificationMessage,
+       attempts_repo: &dyn NotificationAttemptRepository,
+       now: DateTime<Utc>,
+   ) -> Vec<NotificationAttempt>;
+   ```
+   Internally: for each matching rule, INSERT `Pending`, call sender, UPDATE with receipt + `next_retry_at`.
+
+2. **Retry scheduler tick in `runtime::consumer`** (ADR-P3 §P3.7): add a `tokio::time::interval` (10s default, configurable via `RuntimeConfig::notification_retry_tick_seconds`) as a third `select!` arm. On tick: `list_retryable`, reconstruct event from incident + lifecycle_kind, re-render message, call `notifier.retry_one`.
+
+3. **Backoff defaults per target kind** (ADR-P3 §P3.5): when the protocol surfaces a `retry_after`, honor it; otherwise use `[30s, 120s, 600s]` for Telegram/Discord/Webhook and no-retry for Stdout. Max 3 retries (4 total attempts) — configurable via `RuntimeConfig::notification_max_retries`.
+
+### Acceptance criteria
+
+- [ ] `Notifier::dispatch` matches the new signature
+- [ ] Initial dispatch inserts `Pending` and updates to terminal status in one logical sequence
+- [ ] Transient outcome with retries remaining sets `next_retry_at` and status `FailedTransient`
+- [ ] Transient outcome with retries exhausted sets status `FailedPermanent` with `outcome_kind = 'Transient'`
+- [ ] Permanent / Delivered / Suppressed outcomes set terminal status with `next_retry_at = NULL`
+- [ ] Suppressed deliveries (when ADR-L5 suppression is wired) get recorded with `status = 'Suppressed'`
+- [ ] Retry tick picks up retryable rows, inserts new row with `attempt_number + 1` and `parent_attempt_id` set
+- [ ] Message is re-rendered from current incident state at retry time (per ADR-P3 §P3.8) — test asserts that an incident updated between attempts produces a different rendered title/summary
+- [ ] Protocol-supplied `retry_after` overrides default backoff (test with mock Telegram response carrying `parameters.retry_after = 60`)
+- [ ] Stdout target never retries
+- [ ] Consumer task shutdown drains the retry tick cleanly
+
+---
+
+## Re-scope: BTH-13 (retention task)
+
+**Re-scoped by ADR-P3 §P3.11.**
+
+`RetentionConfig` gains a fourth knob:
+
+```rust
+pub struct RetentionConfig {
+    pub observations_max_age:  Option<Duration>,
+    pub incidents_max_age:     Option<Duration>,
+    pub suppressions_grace:    Option<Duration>,
+    pub attempts_max_age:      Option<Duration>,   // NEW (default 30 days)
+    pub vacuum_interval:       Duration,
+}
+```
+
+The sweep gains a fourth `DELETE`:
+
+```sql
+DELETE FROM notification_attempts
+WHERE attempted_at < ? AND status != 'Pending';
+```
+
+`status != 'Pending'` guards against deleting an in-flight attempt. Updated acceptance criteria on BTH-13:
+
+- [ ] `RetentionConfig` has the new field with default `Some(Duration::from_days(30))`
+- [ ] Test: completed attempts older than `attempts_max_age` are deleted
+- [ ] Test: `Pending` rows are never deleted, even if older than the threshold
+
+---
+
+# Phase A — Local operator API (post-architecture-review)
+
+Per ADR-A1. The operator-facing HTTP surface that closes the V0 product loop.
+
+## BTH-56: axum HTTP server bootstrap + graceful shutdown
+
+**Type** Task • **Priority** High • **Estimate** S • **Component** api
+**ADRs** **A1** • **Blocked by** #1 (BTH-1, deps) • **Blocks** #70 (BTH-57)
+
+### Description
+
+Add `src/api/` module tree with `axum`-based HTTP server bootstrap. The server is a third tokio task spawned alongside the consumer and the notification worker (per ADR-A1 §A1.4). Binds `127.0.0.1:8487` by default, configurable via `bithound.toml [api]`.
+
+```toml
+[api]
+bind = "127.0.0.1:8487"
+enabled = true
+```
+
+```rust
+// src/api/server.rs
+pub async fn run(
+    bind: SocketAddr,
+    deps: ApiDeps,
+    mut shutdown: broadcast::Receiver<()>,
+) -> Result<(), ApiError>;
+
+pub struct ApiDeps {
+    pub sidecar_id: SidecarId,
+    pub started_at: DateTime<Utc>,
+    pub incident_repo: Arc<dyn IncidentRepository>,
+    pub observation_store: Arc<dyn ObservationStore>,
+    pub attempts_repo: Arc<dyn NotificationAttemptRepository>,
+}
+```
+
+Add dependencies to `Cargo.toml`:
+```toml
+axum = "0.7"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
+```
+
+No handlers yet — that's BTH-57.
+
+### Acceptance criteria
+- [ ] `cargo run -- --config examples/bithound.example.toml` starts an HTTP server on `127.0.0.1:8487`
+- [ ] `GET /` returns 404 (no routes mounted yet)
+- [ ] SIGINT to the process triggers graceful shutdown of the server within 5s
+- [ ] `[api].enabled = false` disables the server entirely (no bind)
+- [ ] `[api].bind` accepts and validates `SocketAddr` strings
+- [ ] tower-http tracing middleware logs each request at info-level
+
+---
+
+## BTH-57: V0 operator API endpoints
+
+**Type** Story • **Priority** High • **Estimate** M • **Component** api
+**ADRs** **A1** §A1.1 • **Blocked by** #69 (BTH-56), #12 (BTH-12), #11 (BTH-11), #64 (BTH-52) • **Blocks** —
+
+### Description
+
+Implement four read-only endpoints per ADR-A1 §A1.1:
+
+```text
+GET /health                    — sidecar liveness + DB check + collector status
+GET /incidents/open            — incidents with status != Resolved
+GET /incidents/:id             — full incident detail
+GET /incidents/:id/evidence    — full observations referenced by incident.evidence
+```
+
+JSON DTOs in `src/api/dto.rs` separate from domain types so the wire format can evolve independently.
+
+Handlers under `src/api/handlers/`:
+- `health.rs`
+- `incidents.rs` (three routes for incidents)
+
+Error handling: `ApiError` implements `IntoResponse`. 404 for missing IDs, 503 for DB unreachability on `/health`, 500 for unexpected errors.
+
+### Acceptance criteria
+- [ ] `curl localhost:8487/health` returns 200 with the documented JSON shape
+- [ ] `curl localhost:8487/incidents/open` returns 200 with an array (empty when no incidents)
+- [ ] `curl localhost:8487/incidents/:id` returns 200 with the full Incident or 404
+- [ ] `curl localhost:8487/incidents/:id/evidence` returns the referenced observations; missing observations (swept by retention) are silently omitted
+- [ ] DTOs round-trip via serde (parse the JSON back into the DTO struct)
+- [ ] When DB is unreachable, `/health` returns 503 with `db.reachable=false` in the body
+- [ ] Integration test using `axum::Router::oneshot()` covers all four routes
+
+---
+
+# Phase 1 (continued) — Identity refinements
+
+## BTH-54: `EntityRef::Sidecar` + sub-entity scoping (ADR-N1)
+
+**Type** Task • **Priority** High • **Estimate** S • **Component** shared
+**ADRs** **N1** • **Blocked by** #3 (BTH-3, `EntitySubjectKind`) • **Blocks** #54 (BTH-47 ADR-D1 — and any downstream that uses EntityRef in identity-sensitive ways)
+
+### Description
+
+Two changes to `src/shared/types.rs`:
+
+1. Add `EntityRef::Sidecar(SidecarId)` variant and the matching `EntitySubjectKind::Sidecar` discriminant.
+
+2. Scope sub-entity IDs under their parent node:
+
+```rust
+pub enum EntityRef {
+    Sidecar(SidecarId),
+    Host(HostId),
+    BitcoinNode(BitcoinNodeId),
+    BitcoinPeer { node_id: BitcoinNodeId, peer_id: BitcoinPeerId },
+    LndNode(LndNodeId),
+    LndPeer    { node_id: LndNodeId, peer_id: LndPeerId },
+    LndChannel { node_id: LndNodeId, channel_id: LndChannelId },
+    LndInvoice { node_id: LndNodeId, invoice_id: LndInvoiceId },
+}
+```
+
+Update:
+- `EntityRef::subject_kind()` exhaustive match (compile error if a variant is added without updating).
+- `IncidentFingerprint::as_key` (and its `subject_kind_and_id` helper) to produce `parent_id/sub_id` form for scoped variants and `sidecar` for the new variant.
+
+### Acceptance criteria
+- [ ] `EntityRef` has the new `Sidecar` variant and four scoped variants
+- [ ] `EntitySubjectKind::Sidecar` added
+- [ ] `subject_kind()` covers all 8 variants exhaustively (compile error if any new variant is added)
+- [ ] `IncidentFingerprint::as_key` produces `sidecar|<id>|<kind>|-` for sidecar subjects
+- [ ] `as_key` produces `lnd_channel|<node_id>/<channel_id>|<kind>|-` for scoped variants
+- [ ] Serde round-trip tests for the new variants
+- [ ] Existing fingerprint tests (BTH-4) still pass against the scoped form
+
+---
+
+# Phase 10 (continued) — Notification worker
+
+## BTH-55: Notification worker task (ADR-N2)
+
+**Type** Story • **Priority** High • **Estimate** M • **Component** runtime + notifications
+**ADRs** **N2** (amends S1 §S1.4, P3 §P3.7) • **Blocked by** #63 (BTH-51), #35 (BTH-35 re-scoped) • **Blocks** —
+
+### Description
+
+Move notification dispatch out of the central consumer task into a separate worker task per ADR-N2.
+
+Changes:
+
+1. **Consumer task** (BTH-35 re-scope): on `IncidentEvent::Lifecycle`, the consumer:
+   - composes the `NotificationMessage`
+   - for each matching `NotificationRule`: builds a `NotificationAttempt` (status=Pending), calls `attempts_repo.insert_pending()`
+   - sends a `NotificationDispatch { event, message, attempts, targets }` over an mpsc channel to the worker
+
+2. **New notification worker task** in `src/runtime/notification_worker.rs`:
+   - receives `NotificationDispatch` messages
+   - for each `(attempt_id, target)`: calls the sender, builds `DeliveryReceipt`, calls `attempts_repo.complete(attempt_id, receipt, None)` (no retry path in V0)
+
+3. **Channel**: bounded `mpsc::channel<NotificationDispatch>(256)`. Backpressure on the consumer's `send` is acceptable.
+
+4. **Supervisor**: spawns the worker alongside the consumer; subscribes to the shared broadcast shutdown signal.
+
+The V0 worker has no retry tick (per ADR-P3 audit-only revision and ADR-N2 §N2.4). V0.1 (BTH-53) adds the retry `select!` arm.
+
+### Acceptance criteria
+- [ ] `NotificationDispatch` channel type defined
+- [ ] Consumer no longer calls `notifier.dispatch()` directly
+- [ ] Worker task in `src/runtime/notification_worker.rs` with `run(rx, attempts_repo, senders, shutdown)`
+- [ ] Pending row inserted by the consumer before the event is sent to the worker
+- [ ] Worker UPDATEs the row to terminal status after dispatch completes
+- [ ] If the worker is killed mid-dispatch, the row stays Pending (audit trail preserved)
+- [ ] Two-writer invariant: consumer INSERTs Pending rows; worker UPDATEs to terminal. Per-row immutability preserved (each row has one INSERT + one UPDATE).
+- [ ] Integration test: shutdown signal stops both tasks within 5s
+
+---
+
+# Phase 11 (continued) — RPC unreachability rule
+
+## BTH-58: `BitcoinRpcUnreachableRule` + `bitcoin.rpc_unreachable` kind
+
+**Type** Story • **Priority** Medium • **Estimate** S • **Component** rules
+**ADRs** L2 §L2.1; review §3 V0 rules • **Blocked by** #19 (BTH-19), #25 (BTH-25), #37 (BTH-37), #16 (BTH-16) • **Blocks** #40 (BTH-40)
+
+### Description
+
+Add the third V0 rule (per the architecture review §3): `bitcoin.rpc_unreachable`. Fires when Bithound cannot reach the node's RPC over a sustained interval — i.e. the operator can't query their node.
+
+Lives in `src/diagnostics/rules/bitcoin/rpc_unreachable.rs`. Implements `DiagnosticRule`. Reads from `ctx.health` (via `HealthReadModel::current_health`) for the four Bitcoin RPC health targets:
+
+- `bitcoin.rpc.getblockchaininfo`
+- `bitcoin.rpc.getmempoolinfo`
+- `bitcoin.rpc.getnetworkinfo`
+- `bitcoin.rpc.getpeerinfo`
+
+Pattern: Active if all four health observations show `HealthStatus::Critical` for ≥ 60 seconds. Cleared if any returns to `HealthStatus::Ok`.
+
+Also add the kind to `config/default_kinds.toml` (per BTH-16):
+
+```toml
+[[kinds]]
+name = "bitcoin.rpc_unreachable"
+allowed_subjects = ["BitcoinNode"]
+allows_dimension = false
+min_open_confidence = "High"
+```
+
+`min_open_confidence = "High"` because RPC unreachability is unambiguous when all four targets are simultaneously critical.
+
+### Acceptance criteria
+- [ ] Rule emits Active draft when all four RPC health targets are Critical for ≥ 60s
+- [ ] Rule emits Cleared draft when any target returns to Ok
+- [ ] Confidence = High; severity = Critical
+- [ ] `kind = IncidentKind::from_well_known("bitcoin.rpc_unreachable")`
+- [ ] Subject = `EntityRef::BitcoinNode(node_id)`
+- [ ] Tests covering: all-four-critical → Active; partial-recovery → Cleared; brief outage (<60s) → no draft
+- [ ] `default_kinds.toml` entry added with parity-test pass

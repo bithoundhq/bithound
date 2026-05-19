@@ -31,25 +31,44 @@ HA / multi-sidecar. Each has a designed surface to land against later.
 
 | # | Phase                              | Tickets   | Spec refs                |
 |---|------------------------------------|-----------|--------------------------|
-| 1 | Foundation & cleanups              | BTH-1–6   | ADR-001, L1, R2          |
+| 1 | Foundation & cleanups              | BTH-1–6, **BTH-54** | ADR-001, L1, R2, **N1** |
 | 2 | Read-model trait surface           | BTH-7–8   | ADR-R1, 001              |
-| 3 | Storage layer (SQLite)             | BTH-9–14  | ADR-P1, P2, L4, L5       |
+| 3 | Storage layer (SQLite)             | BTH-9–14, BTH-51, BTH-52 | ADR-P1, P2, **P3** (audit-only V0), L4, L5 |
 | 4 | Kind registry                      | BTH-15–16 | ADR-L1                   |
 | 5 | Incident engine                    | BTH-17–19 | ADR-L1–L4                |
 | 6 | Read-model store                   | BTH-20–25 | ADR-R1, R3               |
 | 7 | Collector layer                    | BTH-26–28 | ADR-C1, C2, C3           |
-| 8 | Notifier sender implementations    | BTH-29–31 | (no new ADR — code work) |
+| 8 | Notifier sender (V0: webhook only) | **BTH-29** | (no new ADR — code work) |
 | 9 | Config loading                     | BTH-32–33 | ADR-X1                   |
-| 10| Runtime loop                       | BTH-34–37 | ADR-S1, S2, S3           |
-| 11| First diagnostic rules             | BTH-38–39 | ADR-L2, R1; catalog A1/A3|
+| 10| Runtime loop                       | BTH-34–37, **BTH-55** | ADR-S1, S2, S3, **N2** |
+| 11| First diagnostic rules             | BTH-38, BTH-39, **BTH-58** | ADR-L2, R1; review §3 V0 rules |
 | 12| End-to-end verification & docs     | BTH-40–41 | —                        |
+| A | Local operator API                 | **BTH-56, BTH-57** | **ADR-A1**           |
 | D | Domain refinement (DMMF alignment) | BTH-42–50 | ADR-D1, D2, D3, D4       |
+| V0.1 | (deferred from V0)              | BTH-30, BTH-31, BTH-53 | ADR-P3 §§P3.5–P3.8 |
 
 **Phase D** can run in parallel with phases 3–10 once Phase 1 is done.
 BTH-47 (Unvalidated/Validated split) and BTH-48 (ActorId + commands)
 are prerequisites for the **re-scoped** BTH-17 / BTH-19 / BTH-35. The
 name-newtype migration (BTH-42 → BTH-43 → BTH-44/45 → BTH-46) can
 proceed independently and incrementally.
+
+**Phase A** (local operator API) can land any time after Phase 3 (it
+reads from the repositories). It does not block end-to-end testing
+but closes the V0 product loop — without it, operators can only see
+incidents via notifications.
+
+**V0 product thesis (per architecture review):** a sidecar that
+monitors one Bitcoin Core node, detects three operational incidents
+(`bitcoin.rpc_unreachable`, `bitcoin.no_peers`, `bitcoin.tip_lag_or_ibd_stalled`),
+persists evidence, emits lifecycle events, notifies via webhook, and
+exposes open incidents through a local API. Telegram, Discord, retry
+queue, and suppression all move to V0.1.
+
+**ADR-P3 additions** to Phase 3 / Phase 10 (notification attempts +
+durable retry). BTH-51 + BTH-52 land alongside the existing storage
+tickets; BTH-53 lands alongside BTH-35 (consumer) and the
+`Notifier::dispatch` signature change rolls into BTH-29/30/31.
 
 ## Milestones
 
@@ -114,13 +133,13 @@ after BTH-1.
 
 | Size | Effort       | Tickets |
 |------|--------------|---------|
-| S    | ½–1 day      | 22      |
-| M    | 1–2 days     | 21      |
+| S    | ½–1 day      | 23      |
+| M    | 1–2 days     | 23      |
 | L    | 3–5 days     | 7       |
 
-**Total:** ~60–95 person-days for a single contributor working end to
-end (Phases 1–12 + Phase D combined). A small team of 3 with the
-dependency graph above can ship V0 in ~5 calendar weeks.
+**Total:** ~65–100 person-days for a single contributor working end to
+end (Phases 1–12 + Phase D + ADR-P3 additions combined). A small team
+of 3 with the dependency graph above can ship V0 in ~5 calendar weeks.
 
 ## Quality gates per ticket
 
