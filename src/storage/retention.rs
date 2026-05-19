@@ -1,5 +1,4 @@
-//! Retention background task per ADR-P2 §P2.5 (with `attempts_max_age`
-//! added in ADR-P3 §P3.11).
+//! Retention background task.
 //!
 //! The task ticks on `vacuum_interval` and deletes rows older than the
 //! configured ages from each table, then runs `VACUUM`. A `None` age
@@ -17,8 +16,8 @@ pub struct RetentionConfig {
     pub observations_max_age: Option<Duration>,
     pub incidents_max_age: Option<Duration>,
     pub suppressions_grace: Option<Duration>,
-    /// Per ADR-P3 §P3.11. Defaults shorter than observations because
-    /// attempts are denser (one row per dispatch + retries).
+    /// Defaults shorter than observations because attempts are denser
+    /// (one row per dispatch + retries).
     pub attempts_max_age: Option<Duration>,
     pub vacuum_interval: Duration,
 }
