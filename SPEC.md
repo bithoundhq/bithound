@@ -6283,13 +6283,23 @@ multiplicities in exchange for the cloud-readiness benefits.
 
 ---
 
-## ADR-P3 — Notification attempts persistence (with durable retry)
+## ADR-P3 — Notification attempts persistence
 
 **Date.** 2026-05-19.
-**Status.** Accepted.
-**Scope.** Persistent storage of notification dispatch attempts; durable
-retry queue across restarts; state machine for in-flight, succeeded,
-failed-transient, failed-permanent, and suppressed deliveries.
+**Status.** Accepted (revised same day — see ADR-N2 for the V0 / V0.1 split).
+**Scope.** Persistent storage of notification dispatch attempts.
+Schema and trait surface are V0; durable retry queue is **V0.1**.
+
+> **Revision note (post-architecture-review).** This ADR originally
+> shipped V0 with durable retry from day one. After the architecture
+> review, the V0 scope was reduced to **audit-only** persistence: every
+> attempt is recorded with its terminal outcome, but no retry queue,
+> no scheduler tick, no `FailedTransient` state. The schema retains
+> the retry columns (`attempt_number`, `parent_attempt_id`,
+> `next_retry_at`) for forward compatibility; they are simply unused
+> until V0.1. Sections §§P3.5, P3.6, P3.7, P3.8 below are now
+> **V0.1 commitments**, not V0. ADR-N2 covers the consumer/worker
+> split that makes the deferral possible.
 
 **Context.** ADR-L5 declared the `DeliveryOutcome` taxonomy (Delivered,
 Transient, Permanent, Suppressed) and noted that suppressed deliveries
@@ -6338,6 +6348,14 @@ logical delivery.
 Each row has exactly one INSERT (when status is `Pending`) and one
 UPDATE (when transitioning to a terminal status). No row ever
 transitions between terminal states.
+
+**V0 subset.** In V0 (audit-only), the `Transient`/`FailedTransient`
+path is unused — every attempt resolves to `Succeeded`,
+`FailedPermanent`, or `Suppressed`. A protocol-level transient error
+(e.g. Telegram rate-limit) is recorded as `FailedPermanent` with
+`outcome_kind = 'Transient'` in V0 because there is no retry queue to
+reschedule it. V0.1 introduces the `FailedTransient` terminal-for-this-row
+state and the retry path that produces new rows from it.
 
 ### P3.2 — Schema
 
@@ -6471,7 +6489,7 @@ The old `incident_lifecycle_event: IncidentLifecycleEvent` and
   persisted; `target_kind` + `target_summary` captures the
   not-sensitive shape.
 
-### P3.5 — Backoff per target kind
+### P3.5 — Backoff per target kind *(V0.1)*
 
 Each notifier sender reports a transient outcome with an optional
 `retry_after` field that the protocol surfaces (Telegram's API field,
@@ -6492,7 +6510,7 @@ error response) is honored when present; same for Discord's
 `Retry-After` header. If the protocol-supplied delay exceeds the
 default for that attempt number, use the protocol's value.
 
-### P3.6 — Max attempts: 3 retries (4 total)
+### P3.6 — Max attempts: 3 retries (4 total) *(V0.1)*
 
 ```rust
 // src/runtime/config.rs
@@ -6508,7 +6526,7 @@ After the 3rd retry's `Transient` outcome, the attempt is marked
 `FailedPermanent` with `outcome_kind = 'Transient'` (the underlying
 cause was transient, but we've exhausted retries).
 
-### P3.7 — Retry scheduler in the consumer task
+### P3.7 — Retry scheduler *(V0.1; lives in the notification worker per ADR-N2, not the consumer)*
 
 The retry scheduler is an additional `tokio::select!` branch in the
 existing consumer task (ADR-S1, ADR-S3). No separate task, no new
@@ -6555,7 +6573,7 @@ The single-writer property (ADR-L4 §L4.4, ADR-S1) is preserved
 naturally — the retry path runs in the same task as the primary
 dispatch path.
 
-### P3.8 — Re-render messages from incident state on retry
+### P3.8 — Re-render messages from incident state on retry *(V0.1)*
 
 When a retry fires, the consumer re-renders the `NotificationMessage`
 from current incident state rather than persisting the original
@@ -6585,7 +6603,7 @@ When the V0.1 notifier drops a delivery because of a `SuppressionRule`
 This is the audit trail ADR-L5 §L5.4 promised. The future operator UI
 displays "muted by rule X" for each suppressed attempt.
 
-### P3.10 — `Notifier::dispatch` signature change
+### P3.10 — `Notifier::dispatch` signature change *(V0 shape per ADR-N2)*
 
 The current return type is `Vec<(NotificationRuleId, DeliveryReceipt)>`.
 ADR-P3 changes it to:
@@ -6720,6 +6738,692 @@ Re-scopes:
   `src/storage/sqlite/notification_attempt_repository.rs`, and the
   memory counterpart added.
 - § 21.5 / § 21.9 — inventory refreshed.
+
+---
+
+## ADR-N1 — Identity refinements (Sidecar subject + sub-entity scoping)
+
+**Date.** 2026-05-19.
+**Status.** Accepted.
+**Scope.** Two structural fixes to `EntityRef`: add the `Sidecar`
+variant; scope sub-entity IDs under their parent node. Surfaces from
+the architecture-review handoff (Sections 4.1, 4.2).
+
+**Context.**
+
+Two gaps in the current identity model:
+
+1. `EntityRef` lacks a `Sidecar` variant. Heartbeats, collector
+   failure observations, storage errors, runtime degradation, and
+   self-health diagnostics all have the sidecar as their natural
+   subject but no way to express that. Today they would have to
+   borrow some `EntityRef::Host` or `EntityRef::BitcoinNode` value,
+   which conflates infrastructure layers.
+
+2. Sub-entity newtypes — `BitcoinPeerId`, `LndPeerId`, `LndChannelId`,
+   `LndInvoiceId` — are wrapped flatly:
+   `EntityRef::LndChannel(LndChannelId)`. The IDs are protocol-level
+   identifiers that are *not* globally unique across multiple nodes a
+   single sidecar might monitor. Two LND nodes can each have a
+   channel with the same short-channel-id. The flat `EntityRef`
+   collapses them into one fingerprint and one read-model key.
+
+Fixing both before LND code lands is cheap. Fixing them later requires
+schema migrations.
+
+**Decision.**
+
+### N1.1 — Add `EntityRef::Sidecar` and `EntitySubjectKind::Sidecar`
+
+```rust
+// src/shared/types.rs
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum EntityRef {
+    Sidecar(SidecarId),                                // NEW
+    Host(HostId),
+    BitcoinNode(BitcoinNodeId),
+    BitcoinPeer { node_id: BitcoinNodeId, peer_id: BitcoinPeerId },     // scoped per N1.2
+    LndNode(LndNodeId),
+    LndPeer    { node_id: LndNodeId, peer_id: LndPeerId },              // scoped
+    LndChannel { node_id: LndNodeId, channel_id: LndChannelId },        // scoped
+    LndInvoice { node_id: LndNodeId, invoice_id: LndInvoiceId },        // scoped
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum EntitySubjectKind {
+    Sidecar,                                           // NEW
+    Host,
+    BitcoinNode,
+    BitcoinPeer,
+    LndNode,
+    LndPeer,
+    LndChannel,
+    LndInvoice,
+}
+```
+
+`EntityRef::subject_kind()` and the per-variant `subject_kind_and_id`
+helper in `IncidentFingerprint::as_key` are updated to cover the new
+shape.
+
+### N1.2 — Scope sub-entity IDs under parent nodes
+
+`BitcoinPeer`, `LndPeer`, `LndChannel`, `LndInvoice` become struct
+variants carrying both `node_id` and the sub-entity's local ID. The
+old form was:
+
+```rust
+EntityRef::LndChannel(LndChannelId)
+```
+
+The new form is:
+
+```rust
+EntityRef::LndChannel { node_id: LndNodeId, channel_id: LndChannelId }
+```
+
+The same applies to peers and invoices. Bitcoin peers are likewise
+scoped under their `BitcoinNodeId`.
+
+### N1.3 — Fingerprint `as_key` updates
+
+The `subject_kind_and_id` helper for `IncidentFingerprint::as_key`
+gets a new format for scoped variants:
+
+```text
+sidecar|<sidecar_id>|<kind>|<dimension or '-'>
+host|<host_id>|<kind>|<dimension or '-'>
+bitcoin_node|<node_id>|<kind>|<dimension or '-'>
+bitcoin_peer|<node_id>/<peer_id>|<kind>|<dimension or '-'>
+lnd_node|<node_id>|<kind>|<dimension or '-'>
+lnd_peer|<node_id>/<peer_id>|<kind>|<dimension or '-'>
+lnd_channel|<node_id>/<channel_id>|<kind>|<dimension or '-'>
+lnd_invoice|<node_id>/<invoice_id>|<kind>|<dimension or '-'>
+```
+
+`/` separates parent ID from sub-entity ID within the subject field.
+Stable, greppable, no escaping needed because `node_id`/`peer_id`/etc.
+are validated via ADR-D2's dotted-name parser (or via stricter
+per-type rules; see ADR-D2 follow-ups).
+
+### N1.4 — Heartbeat observations use `EntityRef::Sidecar`
+
+The `Observation::heartbeat` constructor's `ObservationContext.subject`
+should be `EntityRef::Sidecar(ctx.source.sidecar_id)`. This is a
+convention, not enforced — but the V0 sidecar-self collector must
+emit heartbeats this way.
+
+### N1.5 — V0 incident kinds using `Sidecar`
+
+Two `sidecar.*` incident kinds anticipated:
+
+- `sidecar.collector_failing` — `allowed_subjects = [Sidecar]`,
+  `allows_dimension = true` (`dimension_label = "collector_id"`).
+- `sidecar.storage_unavailable` — V0.1+.
+
+Both ride the same fingerprint structure as any other incident.
+
+**Rationale.**
+
+- **Sidecar is a first-class subject** — heartbeats, self-health
+  observations, and operational sidecar incidents need stable
+  identity. Borrowing another `EntityRef` variant was a smell.
+- **Sub-entity scoping prevents cross-node collisions** — without
+  scoping, a single sidecar monitoring two LND nodes would fingerprint
+  channels with overlapping IDs into the same incident. Cheap to fix
+  pre-implementation.
+- **Stable as_key format** — `parent_id/sub_id` is greppable and
+  index-friendly. SQL queries against the `subject_kind, subject_id`
+  composite index work with the flattened `node_id/sub_id` form.
+
+**Alternatives considered.**
+
+- **Keep flat IDs, add a "context node" field on the incident** —
+  rejected; the subject IS the fingerprint key, and contextual fields
+  outside the fingerprint defeat dedup.
+- **Make sub-entity IDs globally unique by including the node ID in
+  their string form** — rejected; the protocol-level IDs come from
+  external sources we don't control. Better to express the structure
+  in the type system.
+- **Defer scoping to V0.1** — rejected; cheaper to do now, before any
+  code references the flat form.
+
+**Spec updates queued.**
+
+- § 5.1 / § 5.2 — identity tables show the new variants.
+- § 10.1 — `Incident.fingerprint.subject` documentation references
+  the scoped form.
+- § 21.2 — inventory includes the revised `EntityRef`.
+- ADR-L1 §3 — `EntitySubjectKind` enum cross-referenced; the trait
+  surface in `EntityRef::subject_kind()` gains a `Sidecar` arm.
+
+---
+
+## ADR-N2 — Notification delivery worker (out of the central consumer)
+
+**Date.** 2026-05-19.
+**Status.** Accepted. **Amends ADR-S1 §S1.4 and ADR-P3 §P3.7.**
+**Scope.** Move notification dispatch out of the central consumer task
+into a separate worker task. Surfaces from the architecture-review
+handoff (Section 4.9).
+
+**Context.**
+
+ADR-S1 designed the consumer task as a single writer that owns the
+read-model store, the incident engine, and (per ADR-P3 §P3.7)
+notification dispatch + the retry tick.
+
+The architecture review observed that this conflates two different
+"single writer" guarantees:
+
+- Single writer for *state mutation* (read models, engine map): this
+  is the invariant that ADR-S1 actually needs to avoid locking.
+- Single writer for *I/O*: this is what the original design
+  accidentally produced by putting dispatch in the consumer.
+
+Conflating them means a slow Telegram API call or a webhook timeout
+can backpressure the entire observation pipeline. Collectors stall
+because the consumer is blocked in `notifier.dispatch.await`.
+
+**Decision.**
+
+### N2.1 — Split into consumer + notification worker
+
+```text
+[Collectors] ─mpsc─→ [Consumer task]   single writer for state
+                          │
+                          │   on Lifecycle event:
+                          │     insert Pending row(s) for each matching rule
+                          │     send (event, message, attempt_ids) → notif_tx
+                          │
+                          ▼
+                    [Notification worker task]   single writer for dispatch
+                          loop:
+                            recv (event, message, attempt_ids)
+                            for attempt in attempt_ids:
+                              receipt = sender.send(target, message)
+                              attempts_repo.complete(attempt, receipt, None)
+```
+
+The consumer's responsibility ends at "the Pending row exists and the
+worker has been notified." The worker's responsibility ends at "the
+row is in a terminal state."
+
+If the worker dies between consumer-enqueue and the terminal UPDATE,
+the row stays `Pending` indefinitely. This is the **audit-trail
+guarantee**: every dispatch attempt has a row, even if it never
+completed. Retention sweeps skip `Pending` rows (per ADR-P3 §P3.11).
+
+### N2.2 — Channel shape
+
+```rust
+// src/runtime/notification_worker.rs
+pub struct NotificationDispatch {
+    pub event: IncidentLifecycleEvent,
+    pub message: NotificationMessage,
+    pub attempts: Vec<NotificationAttemptId>,    // already Pending in the DB
+    pub targets: Vec<(NotificationAttemptId, NotificationTarget)>,
+        // target carries SecretString; lives in memory only, never persisted
+        // (per ADR-P3 §P3.2). Paired with attempt ID so the worker knows
+        // which Pending row corresponds to which sender call.
+}
+```
+
+Bounded `mpsc::channel(256)`. On overflow (consumer faster than
+worker), backpressure on the consumer's `send` is acceptable for V0 —
+notification storms are exceptional and stalling collection briefly
+during one is better than silently dropping notifications.
+
+### N2.3 — Consumer's lifecycle-event handling
+
+```rust
+IncidentEvent::Lifecycle(event) => {
+    let message = compose_notification_message(&event);
+    let mut attempts = Vec::new();
+    let mut targets  = Vec::new();
+    for rule in notification_rules.iter().filter(|r| r.matches(&event)) {
+        let target = resolve_target(&rule.target, &config_secrets);
+        let attempt = NotificationAttempt::pending(rule, &event, &target);
+        attempts_repo.insert_pending(&attempt).await?;
+        attempts.push(attempt.id.clone());
+        targets.push((attempt.id, target));
+    }
+    if !attempts.is_empty() {
+        notif_tx.send(NotificationDispatch {
+            event, message, attempts, targets,
+        }).await?;
+    }
+}
+```
+
+The consumer never blocks on dispatch — `send` blocks only if the
+channel is full, which is a different (and bounded) failure mode.
+
+### N2.4 — V0 worker is straight dispatch
+
+```rust
+pub async fn run(
+    mut rx: mpsc::Receiver<NotificationDispatch>,
+    attempts_repo: Arc<dyn NotificationAttemptRepository>,
+    senders: NotifierSenders,
+    mut shutdown: broadcast::Receiver<()>,
+) {
+    loop {
+        tokio::select! {
+            Some(dispatch) = rx.recv() => {
+                for (attempt_id, target) in dispatch.targets {
+                    let receipt = senders.dispatch(&target, &dispatch.message).await;
+                    let _ = attempts_repo.complete(&attempt_id, receipt, None).await;
+                }
+            }
+            _ = shutdown.recv() => break,
+        }
+    }
+}
+```
+
+No retry tick. No `list_retryable` call. The third argument to
+`complete` is always `None` (no `next_retry_at`). V0.1 adds the
+retry-tick `select!` arm and starts using `list_retryable`.
+
+### N2.5 — V0.1 worker adds retry
+
+Per ADR-P3 §§P3.5–P3.8, the V0.1 worker gains:
+
+```rust
+let mut retry_ticker = tokio::time::interval(
+    Duration::from_secs(config.notification_retry_tick_seconds)
+);
+
+loop {
+    tokio::select! {
+        Some(dispatch) = rx.recv() => { … V0 logic + compute next_retry_at … }
+        _ = retry_ticker.tick() => {
+            for retryable in attempts_repo.list_retryable(now, 32).await? {
+                let incident = incident_repo.get(&retryable.incident_id).await?;
+                let event    = reconstruct_event(&retryable, &incident);
+                let message  = compose_notification_message(&event);
+                let target   = resolve_target(&retryable.target_kind, &config_secrets);
+                let new_attempt = NotificationAttempt::retry_of(&retryable);
+                attempts_repo.insert_pending(&new_attempt).await?;
+                let receipt = senders.dispatch(&target, &message).await;
+                let next = compute_next_retry_at(&receipt, &retryable);
+                attempts_repo.complete(&new_attempt.id, receipt, next).await?;
+            }
+        }
+        _ = shutdown.recv() => break,
+    }
+}
+```
+
+The single-writer-for-state invariant is unaffected: the worker only
+writes `notification_attempts`; the consumer only writes
+`observations`, `incidents`, and reads `notification_attempts` once
+per Lifecycle event for the initial `insert_pending`.
+
+### N2.6 — Two writers to `notification_attempts`?
+
+Yes — consumer INSERTs `Pending`; worker UPDATEs to terminal. This
+**preserves per-row immutability** (ADR-P3 §P3.1): each row has one
+INSERT and one UPDATE, by two cooperating tasks. The contention is
+zero in practice because:
+
+- INSERT and UPDATE target the same row only in sequence: consumer
+  INSERTs, then sends to worker; worker UPDATEs.
+- The row's `id` is a UUIDv7 — no key collision.
+- SQLite WAL mode allows the brief overlap if the worker is processing
+  an earlier dispatch while the consumer INSERTs a new one.
+
+The single-writer invariant ADR-L4 §L4.4 cares about — preventing
+concurrent mutation of the same logical state — is preserved because
+each row is mutated by exactly one writer at each transition.
+
+### N2.7 — Module placement
+
+```
+src/runtime/
+├── consumer.rs                  # existing, re-scoped per N2.3
+├── notification_worker.rs       # NEW — N2.4 logic
+├── supervisor.rs                # existing — also spawns the worker
+└── mod.rs                       # RuntimeDeps gains notif_tx + worker handle
+```
+
+### N2.8 — Shutdown coordination
+
+Both tasks subscribe to the broadcast shutdown signal. On shutdown:
+
+1. Consumer's collector tasks stop accepting new batches.
+2. Consumer drains its mpsc, processes remaining batches, then
+   `drop(notif_tx)` (no more events for the worker).
+3. Worker's `rx.recv()` returns `None`; the worker drains any
+   in-flight dispatches and exits.
+4. Final attempts may remain in `Pending` if the worker can't reach
+   external services during the shutdown window. Acceptable —
+   audit trail intact.
+
+**Rationale.**
+
+- **Decoupling I/O from state mutation** lets notification latency
+  vary independently from collection. A 30s Telegram timeout doesn't
+  block observation ingestion.
+- **Two writers to `notification_attempts` is fine** because the
+  contention is per-row across non-overlapping transitions, not
+  concurrent state mutation.
+- **Audit trail is preserved** even if the worker crashes:
+  `Pending` rows are observable; retention sweeps skip them.
+- **V0 → V0.1 evolution is additive** — V0.1 adds a `select!` arm
+  for retry; V0's straight-dispatch code keeps working.
+
+**Alternatives considered.**
+
+- **Keep dispatch in the consumer (status quo)** — rejected; review
+  showed the I/O backpressure risk.
+- **One writer to `notification_attempts` (worker handles INSERT and
+  UPDATE)** — rejected; loses the audit guarantee if the worker dies
+  before the INSERT.
+- **In-memory queue only, no DB row until completion** — rejected;
+  no audit trail of attempted-but-never-delivered notifications.
+
+**Spec updates queued.**
+
+- § 11.10 — `Notifier::dispatch` becomes worker-side; consumer's
+  responsibility ends at enqueue.
+- § 12.1 — consumer pipeline diagram updated; retry tick removed
+  from consumer.
+- § 15.b — `src/runtime/notification_worker.rs` added.
+- § 21.5 — `NotificationDispatch` channel message added to inventory.
+- ADR-S1 §S1.4 — flagged as amended; consumer is single writer for
+  state, not I/O.
+- ADR-P3 §P3.7 — flagged as superseded by ADR-N2 for V0.1 retry
+  placement.
+
+---
+
+## ADR-A1 — Local operator HTTP API
+
+**Date.** 2026-05-19.
+**Status.** Accepted.
+**Scope.** A local HTTP API for operators to query Bithound state
+directly (without waiting for notifications). Surfaces from the
+architecture-review handoff (Section 4.12).
+
+**Context.**
+
+Bithound is a local-first tool. The spec has rich internal modeling
+but no operator-facing surface. Today an operator's only way to know
+what's wrong is to wait for a Telegram message or read the SQLite DB
+manually. Neither is acceptable for a tool whose product thesis is:
+
+> Help a local Bitcoin node operator know what is wrong, why Bithound
+> thinks so, what evidence supports it, and whether they were notified.
+
+The API is **part of V0**. Without it, the V0 vertical slice doesn't
+close the operator loop.
+
+**Decision.**
+
+### A1.1 — V0 endpoints
+
+Four endpoints, all read-only, JSON responses:
+
+```text
+GET /health
+GET /incidents/open
+GET /incidents/:id
+GET /incidents/:id/evidence
+```
+
+#### `GET /health`
+
+Returns sidecar liveness + DB connectivity:
+
+```json
+{
+  "sidecar_id": "01927f3c-...",
+  "version": "0.1.0",
+  "uptime_seconds": 12345,
+  "latest_heartbeat_at": "2026-05-19T12:00:00Z",
+  "db": {
+    "reachable": true,
+    "latency_ms": 1
+  },
+  "collectors": [
+    {
+      "id": "btc-alice-rpc",
+      "last_run_at": "2026-05-19T12:00:00Z",
+      "last_outcome": "Ok"
+    }
+  ]
+}
+```
+
+200 if DB is reachable and the latest heartbeat is within the
+expected interval. 503 with the same body shape if either fails.
+
+#### `GET /incidents/open`
+
+Returns all incidents with `status != Resolved`:
+
+```json
+{
+  "count": 2,
+  "incidents": [
+    {
+      "id": "01927e...",
+      "fingerprint": "bitcoin_node|alice|bitcoin.no_peers|-",
+      "kind": "bitcoin.no_peers",
+      "subject": { "type": "bitcoin_node", "id": "alice" },
+      "severity": "Critical",
+      "status": "Open",
+      "opened_at": "2026-05-19T11:42:00Z",
+      "updated_at": "2026-05-19T11:42:30Z",
+      "summary": "Bitcoin node alice has 0 outbound peers"
+    },
+    ...
+  ]
+}
+```
+
+Ordered by `opened_at` descending. No pagination in V0 (incident
+volume is bounded; if it ever exceeds ~1000, add a limit/offset).
+
+#### `GET /incidents/:id`
+
+Full incident detail:
+
+```json
+{
+  "id": "01927e...",
+  "fingerprint": "...",
+  "kind": "bitcoin.no_peers",
+  "subject": { ... },
+  "severity": "Critical",
+  "status": "Open",
+  "opened_at": "...",
+  "updated_at": "...",
+  "resolved_at": null,
+  "signal_observation_ids": ["01927a...", "01927b..."],
+  "evidence": ["01927c...", "01927d..."],
+  "summary": "...",
+  "evidence_summary": ["3 minutes without outbound peers", ...]
+}
+```
+
+404 if the ID doesn't exist.
+
+#### `GET /incidents/:id/evidence`
+
+Returns the full observations referenced by the incident's
+`evidence` array — i.e. the operator sees the actual data Bithound
+used to decide:
+
+```json
+{
+  "incident_id": "01927e...",
+  "evidence": [
+    {
+      "observation_id": "01927c...",
+      "observed_at": "2026-05-19T11:41:00Z",
+      "subject": { ... },
+      "source": { "collector_id": "btc-alice-rpc", "sidecar_id": "..." },
+      "origin": "Collected",
+      "payload": { ... full ObservationPayload as JSON ... }
+    },
+    ...
+  ]
+}
+```
+
+If an evidence observation ID has been swept by retention, it's
+omitted from the response (silently). 404 if the incident ID itself
+doesn't exist.
+
+### A1.2 — Tech choice: `axum`
+
+```toml
+axum = "0.7"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
+```
+
+`axum` is the natural tokio-ecosystem HTTP framework. Lightweight
+(~300 KB compiled), well-maintained, integrates with `tracing`. The
+alternatives (warp, actix-web, rocket) bring either more boilerplate
+or async-runtime conflicts.
+
+### A1.3 — Binding and security
+
+V0:
+
+- Binds to `127.0.0.1:8487` by default (configurable via
+  `bithound.toml` `[api]` section).
+- **No authentication.** Loopback-only means only local processes can
+  reach it.
+- **No CORS headers.** No browser UI in V0; future web UI work
+  introduces CORS as needed.
+- TLS not supported in V0.
+
+Configuration:
+
+```toml
+[api]
+bind = "127.0.0.1:8487"
+enabled = true   # default; set false to disable the API entirely
+```
+
+V0.2+ adds:
+
+- Optional bearer-token auth for non-loopback binds.
+- TLS termination (or operators run behind a reverse proxy).
+- Web UI assets served from the same axum app.
+
+### A1.4 — Lifecycle inside the runtime
+
+The API server is a third tokio task spawned alongside the consumer
+and the notification worker:
+
+```text
+[supervisor] ──┬──→ [collector tasks]
+               ├──→ [consumer task]
+               ├──→ [notification worker task]
+               └──→ [api server task]              NEW
+```
+
+It holds `Arc` references to the repositories (`IncidentRepository`,
+`ObservationStore`, `NotificationAttemptRepository`) — it never
+mutates state, only reads.
+
+Shutdown coordination: subscribes to the broadcast shutdown signal;
+on signal, finishes in-flight requests then exits. `axum::serve` has
+a built-in graceful shutdown integration.
+
+### A1.5 — DTO shape and wire stability
+
+JSON DTOs live in `src/api/dto.rs`, separate from the domain types.
+Reasons:
+
+- Domain types may change shape (e.g. `Incident.fingerprint` was
+  added in BTH-4); the wire format should evolve more cautiously.
+- DTOs can include only the operator-relevant fields, omit internal
+  ones (e.g. `signal_observation_ids` may stay internal).
+- Future API versioning lives in the DTO layer, not the domain.
+
+V0 DTOs are a thin re-shaping of the domain types. V0.1+ may diverge
+more substantially if web-UI consumers want different framing.
+
+### A1.6 — Module layout
+
+```text
+src/api/
+├── mod.rs                # build_router() -> axum::Router
+├── dto.rs                # wire types
+├── handlers/
+│   ├── health.rs
+│   └── incidents.rs      # /incidents/open, /:id, /:id/evidence
+├── error.rs              # ApiError + IntoResponse impl
+└── server.rs             # spawn task + graceful shutdown
+```
+
+### A1.7 — V0.1 endpoints (designed, not implemented)
+
+For future reference, the V0.1 / V0.2 expansion:
+
+```text
+V0.1:
+  GET  /subjects
+  GET  /observations?subject=...&since=...
+  GET  /notifications/attempts
+  GET  /notifications/attempts/:id
+
+V0.2:
+  POST /incidents/:id/ack           # operator acknowledge
+  POST /incidents/:id/resolve       # operator manual resolve
+  POST /suppressions
+  DELETE /suppressions/:id
+```
+
+The V0 surface is read-only; mutation endpoints come with the
+operator-action commands (ADR-D3 V0.2 work).
+
+**Rationale.**
+
+- **Closes the operator loop.** Without the API, the V0 vertical
+  slice ends at "Telegram was notified" — but the operator may want
+  to inspect even without a notification (e.g. during testing,
+  during an alert from another system, during silent failures).
+- **Read-only V0 keeps the surface minimal.** No auth, no mutation,
+  no UI assets. The four endpoints are ~200 LOC including handlers
+  and DTOs.
+- **Separate task respects ADR-S1.** The API is a reader; the
+  consumer remains single-writer for state.
+- **Loopback default is safe.** No accidental exposure to the network.
+- **`axum` is the conservative choice.** Mature, well-documented,
+  ecosystem-standard.
+
+**Alternatives considered.**
+
+- **No V0 API; defer to V0.2 alongside operator UI** — rejected; the
+  review identified this as the missing link in the V0 product
+  thesis. Without it, "operator knows what's wrong" depends entirely
+  on push notifications.
+- **gRPC instead of HTTP** — rejected; operators use `curl` and `jq`,
+  not protobuf tools. HTTP+JSON is the right surface for a local-first
+  tool.
+- **Unix socket only** — considered; rejected for V0 because most
+  operator scripting still expects TCP/HTTP. Loopback HTTP is the
+  pragmatic middle ground.
+- **Embed in the consumer task** — rejected; the API does I/O and
+  should not block the consumer.
+
+**Spec updates queued.**
+
+- New § 14 (or similar) for the API surface contract.
+- § 15.b — `src/api/` module tree added.
+- § 16 (V0 Product Boundary) — adds the API to V0 scope.
+- § 21 — new inventory entries for the API types.
+- IMPLEMENTATION_PLAN.md — new Phase A (or extension of Phase 12).
+- TICKETS.md — new tickets BTH-N3 (axum bootstrap) and BTH-N4
+  (handlers + DTOs).
 
 
 
