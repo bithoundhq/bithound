@@ -1564,8 +1564,41 @@ over `NotificationTarget`. The trait looks legacy or aspirational.
 
 ## 11.10 Persistence
 
-None. Subscriptions are `Serialize+Deserialize` types but no store exists.
-No delivery log, no retry scheduling.
+**In code today:** none.
+
+**Designed in ADR-P3:** durable notification attempts log with retry
+queue. Every `Notifier::dispatch` call inserts a `Pending` row, then
+updates it to a terminal status with the `DeliveryReceipt`. Transient
+failures with retries remaining set `next_retry_at`; the consumer
+task's retry-ticker (`select!` arm, 10s default tick) picks them up
+and produces a new attempt row with `attempt_number + 1` and
+`parent_attempt_id` linking back.
+
+See § 13.4 for the `NotificationAttemptRepository` trait surface and
+§ 13.bis (new) for the full schema.
+
+Subscriptions remain `Serialize + Deserialize` types only — Telegram
+pairing and Discord webhook configuration persistence is out of V0
+scope.
+
+### `Notifier::dispatch` signature change (ADR-P3 §P3.10)
+
+```rust
+// V0
+pub async fn dispatch(
+    &self,
+    event: &IncidentLifecycleEvent,
+    message: &NotificationMessage,
+    attempts_repo: &dyn NotificationAttemptRepository,
+    now: DateTime<Utc>,
+) -> Vec<NotificationAttempt>;
+```
+
+The return type is now `Vec<NotificationAttempt>` (not just receipts)
+so the caller can inspect retry state without a follow-up repository
+read. Each attempt's `status` reflects the post-dispatch terminal
+value; `next_retry_at` is populated for transient failures still in
+retry budget.
 
 ## 11.11 Suppression filtering (designed; V0.1 — not in V0)
 
@@ -1644,13 +1677,24 @@ the pipeline:
                 SignalRecorded(obs)  → observation_store.append(&obs).await;
                                        read_models.apply(&obs)?
                 IncidentTouched(inc) → incident_repo.save(&inc).await  ← write-through
-                Lifecycle(ev)        → notifier.dispatch(&ev, &compose(&ev)).await
-                                       ← (V0.1+) notifier consults SuppressionRepository
+                Lifecycle(ev)        → notifier.dispatch(&ev, &compose(&ev),
+                                                          &attempts_repo, now).await
+                                       ← inserts Pending row + UPDATE on completion
+                                       ← (V0.1+) consults SuppressionRepository
                 DraftRejected{…}     → tracing::warn!(…)
                 DraftBelowConfidenceFloor{…} → tracing::debug!(…)
             }
         // (V1.0+ cloud sync) the same events are pushed to the cloud
         // control plane — no derivation step needed (ADR-D4).
+
+  on retry_ticker.tick():               ← ADR-P3 §P3.7, default 10s
+    retryable = attempts_repo.list_retryable(Utc::now(), 32).await
+    for old_attempt in retryable:
+      incident = incident_repo.get(old_attempt.incident_id).await
+      event    = reconstruct_event(old_attempt.lifecycle_kind, incident)
+      message  = compose_notification_message(&event)
+      notifier.retry_one(old_attempt, &event, &message, &attempts_repo, now).await
+        ← inserts new row with attempt_number+1, parent_attempt_id = old.id
 ```
 
 The **single-consumer** property is architecturally load-bearing:
@@ -1768,10 +1812,10 @@ ADR cluster.
 
 ## 13.1 Backend
 
-**SQLite via `sqlx`**, one database file (`bithound.db`), three
-tables — `observations`, `incidents`, `suppression_rules`. Hybrid
-schema: indexed columns for hot fields + JSON column for the full
-domain object.
+**SQLite via `sqlx`**, one database file (`bithound.db`), **four**
+tables — `observations`, `incidents`, `suppression_rules`,
+`notification_attempts` (ADR-P3). Hybrid schema: indexed columns for
+hot fields + JSON column for the full domain object.
 
 `Cargo.toml` will gain:
 ```toml
@@ -1841,6 +1885,38 @@ pub enum StoreError {
 the same SQLite backend; the trait signatures are unchanged from
 their original ADRs.
 
+`NotificationAttemptRepository` (ADR-P3) lives in
+`src/notifications/repository.rs`:
+
+```rust
+#[async_trait]
+pub trait NotificationAttemptRepository: Send + Sync {
+    async fn insert_pending(&self, attempt: &NotificationAttempt) -> Result<(), RepoError>;
+    async fn complete(
+        &self,
+        id: &NotificationAttemptId,
+        receipt: DeliveryReceipt,
+        next_retry_at: Option<DateTime<Utc>>,
+    ) -> Result<(), RepoError>;
+    async fn list_retryable(
+        &self,
+        now: DateTime<Utc>,
+        limit: u32,
+    ) -> Result<Vec<NotificationAttempt>, RepoError>;
+    async fn list_for_incident(
+        &self,
+        incident_id: &IncidentId,
+    ) -> Result<Vec<NotificationAttempt>, RepoError>;
+}
+```
+
+The `notification_attempts` table uses **per-row immutability**: each
+attempt INSERTs as `Pending`, UPDATEs to exactly one terminal status
+(`Succeeded`, `FailedTransient`, `FailedPermanent`, `Suppressed`), and
+never moves between terminals. Retries produce *new rows* with
+`attempt_number + 1` and `parent_attempt_id` linking to the prior
+attempt. The retry chain is walked via the `parent_attempt_id` pointer.
+
 ## 13.5 Concurrency
 
 **No manual interior mutability** anywhere. `SqlitePool` is `Clone`
@@ -1854,11 +1930,20 @@ have required.
 
 A `retention::run(pool, config, shutdown_rx)` background task runs in
 its own tokio task alongside the supervisor. Periodically deletes
-rows older than configured ages and runs `VACUUM`. Defaults
-(observations 30d, incidents 365d, suppressions 90d past `until`,
-vacuum every 24h) can be overridden per repo in `bithound.toml`.
+rows older than configured ages and runs `VACUUM`. Defaults:
 
-`0` disables retention for that table.
+| Table | Default max age | Knob |
+|---|---|---|
+| `observations` | 30 days | `observations_max_age_days` |
+| `incidents` (resolved only) | 365 days | `incidents_max_age_days` |
+| `suppression_rules` (past `until`) | 90 days | `suppressions_grace_days` |
+| `notification_attempts` (non-Pending) | 30 days | `attempts_max_age_days` |
+
+Vacuum runs every 24h by default (`vacuum_interval_hours`). All can be
+overridden in `bithound.toml`. `0` disables retention for that table.
+
+The `notification_attempts` sweep skips rows still in `Pending` state
+so an in-flight attempt is never deleted from under the dispatcher.
 
 ## 13.7 Cloud migration path (V0.2+)
 
@@ -1904,11 +1989,14 @@ db_path = "/var/lib/bithound/bithound.db"
 observations_max_age_days = 30
 incidents_max_age_days    = 365
 suppressions_grace_days   = 90
+attempts_max_age_days     = 30      # ADR-P3 §P3.11
 vacuum_interval_hours     = 24
 
 [runtime]
 channel_capacity = 1024
 shutdown_deadline_seconds = 30
+notification_max_retries  = 3       # ADR-P3 §P3.6
+notification_retry_tick_seconds = 10  # ADR-P3 §P3.7
 
 [incidents]
 kinds_config_path = "/etc/bithound/custom_kinds.toml"   # optional, ADR-L1
@@ -2180,7 +2268,10 @@ bithound/
     ├── notifications/
     │   ├── mod.rs
     │   ├── types.rs                            # + DeliveryOutcome::Suppressed (ADR-L5 §L5.4)
+    │   │                                       # + revised NotificationAttempt (ADR-P3 §P3.4)
     │   ├── orchestrator.rs                     # Notifier — suppression-aware (ADR-L5)
+    │   │                                       # + dispatch signature change (ADR-P3 §P3.10)
+    │   ├── repository.rs                       # NotificationAttemptRepository (ADR-P3)
     │   └── targets/                            # unchanged from code today; senders to be implemented
     │
     ├── runtime/                                # ADR-S1, S3
@@ -2199,10 +2290,12 @@ bithound/
     │   │   ├── mod.rs                          # open_pool helper
     │   │   ├── observation_store.rs            # SqliteObservationStore
     │   │   ├── incident_repository.rs          # SqliteIncidentRepository
+    │   │   ├── notification_attempt_repository.rs  # SqliteNotificationAttemptRepository (ADR-P3)
     │   │   └── suppression_repository.rs       # SqliteSuppressionRepository (V0.1)
     │   └── memory/                             # in-memory test impls
     │       ├── observation_store.rs
-    │       └── incident_repository.rs
+    │       ├── incident_repository.rs
+    │       └── notification_attempt_repository.rs  # MemoryNotificationAttemptRepository (ADR-P3)
     │
     ├── config/                                 # ADR-X1
     │   ├── mod.rs                              # Config::load_from_args_and_env, ConfigError
@@ -2607,11 +2700,17 @@ Single binary crate `bithound` 0.1.0. Top-level modules under `src/`:
 - `StoreError` (ADR-P2).
 - `IncidentRepository` trait (ADR-L4 §L4.6).
 - `SuppressionRepository` trait (ADR-L5 §L5.3; V0.1+).
+- `NotificationAttemptRepository` trait (ADR-P3) — `insert_pending` +
+  `complete` + `list_retryable` + `list_for_incident`.
 - `SqliteObservationStore`, `SqliteIncidentRepository`,
-  `SqliteSuppressionRepository` (V0.1) — concrete sqlx impls per ADR-P1.
-- `MemoryObservationStore`, `MemoryIncidentRepository` — test impls per ADR-P2 §P2.7.
-- `RetentionConfig` + `retention::run` (ADR-P2 §P2.5).
-- `migrations/0001_initial.sql` (ADR-P1).
+  `SqliteSuppressionRepository` (V0.1), `SqliteNotificationAttemptRepository`
+  — concrete sqlx impls per ADR-P1 + ADR-P3.
+- `MemoryObservationStore`, `MemoryIncidentRepository`,
+  `MemoryNotificationAttemptRepository` — test impls per ADR-P2 §P2.7
+  and ADR-P3.
+- `RetentionConfig` + `retention::run` (ADR-P2 §P2.5) — extended with
+  `attempts_max_age` per ADR-P3 §P3.11.
+- `migrations/0001_initial.sql` (ADR-P1, ADR-P3) — four tables.
 
 ## 21.6 Concrete collectors found
 
@@ -2681,6 +2780,25 @@ LND, Elements, and cross-cutting categories.
 - `DeliveryOutcome::Suppressed { rule_id: SuppressionRuleId }` — new variant.
 - Notifier suppression-check step (`Notifier::dispatch` consults
   `SuppressionRepository` before fanning out).
+
+**Added in ADR-P3 (V0, not yet in code):**
+
+- `NotificationAttempt` revised: gains `incident_id`, `lifecycle_kind`,
+  `target_kind`, `target_summary`, `attempt_number`,
+  `parent_attempt_id`, `next_retry_at`, `outcome: Option<DeliveryOutcome>`,
+  `external_ref`; loses the embedded full `IncidentLifecycleEvent` and
+  full `NotificationTarget` (the latter carries secrets and must not
+  be persisted).
+- `NotificationAttemptRepository` trait — `insert_pending`, `complete`,
+  `list_retryable`, `list_for_incident`.
+- `NotificationDeliveryStatus` expanded: `Pending`, `Succeeded`,
+  `FailedTransient`, `FailedPermanent`, `Suppressed`.
+- `TargetKind` enum (Telegram, Discord, Webhook, Stdout).
+- `Notifier::dispatch` signature change — accepts
+  `&dyn NotificationAttemptRepository` and returns
+  `Vec<NotificationAttempt>` instead of `Vec<(NotificationRuleId, DeliveryReceipt)>`.
+- Retry scheduler tick in `runtime::consumer` (`select!` arm,
+  10s default).
 
 ## 21.9.5 Runtime types (designed; not yet in code)
 
@@ -6162,6 +6280,446 @@ multiplicities in exchange for the cloud-readiness benefits.
 - § 21.4 — replace `HandleOutcome` with `IncidentEvent` and per-context
   events in the inventory.
 - ADR-L4 §L4.2 — annotated as superseded.
+
+---
+
+## ADR-P3 — Notification attempts persistence (with durable retry)
+
+**Date.** 2026-05-19.
+**Status.** Accepted.
+**Scope.** Persistent storage of notification dispatch attempts; durable
+retry queue across restarts; state machine for in-flight, succeeded,
+failed-transient, failed-permanent, and suppressed deliveries.
+
+**Context.** ADR-L5 declared the `DeliveryOutcome` taxonomy (Delivered,
+Transient, Permanent, Suppressed) and noted that suppressed deliveries
+should leave an audit trail. ADR-P1 and ADR-P2 designed the storage
+layer but only covered observations, incidents, and (in V0.1)
+suppression rules — notification attempts were not addressed.
+
+In code today, `NotificationAttempt` and `DeliveryReceipt` types exist
+but are unused. `Notifier::dispatch` returns
+`Vec<(NotificationRuleId, DeliveryReceipt)>` and the receipts are
+dropped after the call. This is a real gap: operators have no
+notification audit log; transient failures silently vanish; suppressed
+deliveries aren't recorded; cloud sync (per ADR-D4 motivation) has
+nothing to push for the notification side of the pipeline.
+
+The original brainstorm proposed completed-only persistence for V0 with
+durable retry deferred to V0.2. After review, the user committed to
+durable retry from V0 — the additional complexity is bounded at this
+scale and avoids a future refactor.
+
+**Decision.**
+
+### P3.1 — State machine and per-row immutability
+
+Each delivery attempt is a single row in `notification_attempts`. Rows
+move from `Pending` to exactly one terminal state and stay there:
+
+```text
+[Pending]
+  ├──(Delivered)─────────→ [Succeeded]         (terminal)
+  ├──(Permanent error)──→ [FailedPermanent]   (terminal)
+  ├──(Suppressed)────────→ [Suppressed]       (terminal — ADR-L5)
+  └──(Transient error)──→ [FailedTransient]   (terminal-for-this-row)
+                              │
+                              └──(scheduler retries)──→ NEW ROW
+                                                        attempt_number + 1
+                                                        parent_attempt_id = original.id
+                                                        status = Pending
+```
+
+**Retries do not mutate prior rows.** Each retry inserts a new row with
+`attempt_number` incremented and `parent_attempt_id` pointing back. The
+chain (followed via `parent_attempt_id`) is the full retry history per
+logical delivery.
+
+Each row has exactly one INSERT (when status is `Pending`) and one
+UPDATE (when transitioning to a terminal status). No row ever
+transitions between terminal states.
+
+### P3.2 — Schema
+
+```sql
+CREATE TABLE notification_attempts (
+    id                BLOB PRIMARY KEY,        -- NotificationAttemptId (UUIDv7)
+    rule_id           BLOB NOT NULL,            -- NotificationRuleId
+    incident_id       BLOB NOT NULL,            -- joins to incidents.id
+    lifecycle_kind    TEXT NOT NULL,            -- 'Opened' | 'Escalated' | 'Resolved'
+
+    target_kind       TEXT NOT NULL,            -- 'telegram' | 'discord' | 'webhook' | 'stdout'
+    target_summary    TEXT NOT NULL,            -- redacted target description
+
+    status            TEXT NOT NULL,            -- 'Pending' | 'Succeeded'
+                                                --   | 'FailedTransient' | 'FailedPermanent'
+                                                --   | 'Suppressed'
+    attempt_number    INTEGER NOT NULL,         -- 1 on initial, increments per retry
+    parent_attempt_id BLOB,                     -- NULL for first attempt
+
+    next_retry_at     INTEGER,                  -- unix nanos; set on FailedTransient
+                                                --   iff retries remain
+
+    outcome_kind      TEXT,                     -- NULL while Pending; one of
+                                                --   'Delivered' | 'Transient' | 'Permanent'
+                                                --   | 'Suppressed'
+    outcome_json      TEXT,                     -- full DeliveryOutcome serialized
+    external_ref_json TEXT,                     -- ExternalMessageRef JSON if Delivered with one
+
+    attempted_at      INTEGER NOT NULL,         -- unix nanos at INSERT (status=Pending)
+    completed_at      INTEGER                   -- unix nanos at terminal UPDATE
+) STRICT;
+
+CREATE INDEX idx_attempts_incident_id        ON notification_attempts (incident_id);
+CREATE INDEX idx_attempts_rule_id            ON notification_attempts (rule_id);
+CREATE INDEX idx_attempts_status_next_retry  ON notification_attempts (status, next_retry_at);
+CREATE INDEX idx_attempts_attempted_at       ON notification_attempts (attempted_at DESC);
+```
+
+Design notes:
+
+- **No FK on `incident_id`** — same hybrid-column philosophy as ADR-P1.
+  Avoids cascade-delete surprises during retention sweeps.
+- **`target_summary` is the only target column.** Full targets carry
+  `SecretString` URLs and tokens; those are *never* persisted. The
+  summary is human-readable redacted form:
+  `telegram:chat_id=-1001234`, `discord:webhook=host=hooks.discord.com`,
+  `webhook:host=ops.example.com`. The actual secret is reconstructed
+  from config at dispatch time.
+- **`outcome_json`** carries the full `DeliveryOutcome` including
+  `Suppressed { rule_id }` for the ADR-L5 audit case.
+- **`(status, next_retry_at)` composite index** is the hot path for the
+  retry scheduler query.
+- **`STRICT` tables** per ADR-P1 §1 convention.
+
+The DDL is added to `migrations/0001_initial.sql` (no V0 production
+users yet, so amending the initial migration is fine — no second
+migration file needed).
+
+### P3.3 — Repository trait
+
+```rust
+// src/notifications/repository.rs
+#[async_trait]
+pub trait NotificationAttemptRepository: Send + Sync {
+    /// INSERT a new row with status=Pending. Called before dispatch.
+    async fn insert_pending(&self, attempt: &NotificationAttempt)
+        -> Result<(), RepoError>;
+
+    /// UPDATE an existing row from Pending to a terminal status.
+    /// `next_retry_at` is `Some(t)` iff the outcome is Transient and
+    /// retries remain. `Some` schedules a retry; `None` is terminal.
+    async fn complete(
+        &self,
+        id: &NotificationAttemptId,
+        receipt: DeliveryReceipt,
+        next_retry_at: Option<DateTime<Utc>>,
+    ) -> Result<(), RepoError>;
+
+    /// Rows in FailedTransient with next_retry_at <= now, oldest first.
+    /// The retry scheduler calls this on its tick.
+    async fn list_retryable(
+        &self,
+        now: DateTime<Utc>,
+        limit: u32,
+    ) -> Result<Vec<NotificationAttempt>, RepoError>;
+
+    /// All attempts for an incident, newest first. Operator-UI scaffolding (V0.2).
+    async fn list_for_incident(
+        &self,
+        incident_id: &IncidentId,
+    ) -> Result<Vec<NotificationAttempt>, RepoError>;
+}
+```
+
+`RepoError` reuses the variant set from ADR-L4 §L4.6 (`Backend`,
+`Conflict`, `NotFound`).
+
+### P3.4 — `NotificationAttempt` struct revision
+
+The existing in-memory struct gains retry-related fields:
+
+```rust
+pub struct NotificationAttempt {
+    pub id: NotificationAttemptId,
+    pub rule_id: NotificationRuleId,
+    pub incident_id: IncidentId,             // NEW — was implicit in lifecycle_event
+    pub lifecycle_kind: IncidentNotificationEventKind,  // discriminant only — not full event
+    pub target_kind: TargetKind,             // NEW (enum: Telegram, Discord, Webhook, Stdout)
+    pub target_summary: String,              // NEW — redacted
+
+    pub status: NotificationDeliveryStatus,  // expanded to include Suppressed + FailedTransient + FailedPermanent
+    pub attempt_number: u32,                 // NEW
+    pub parent_attempt_id: Option<NotificationAttemptId>,  // NEW
+    pub next_retry_at: Option<DateTime<Utc>>,              // NEW
+
+    pub outcome: Option<DeliveryOutcome>,    // None while Pending
+    pub external_ref: Option<ExternalMessageRef>,
+    pub attempted_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+```
+
+The old `incident_lifecycle_event: IncidentLifecycleEvent` and
+`target: NotificationTarget` fields are removed:
+
+- The full lifecycle event would duplicate `incidents` rows and carry
+  redundant data; storing `incident_id` + `lifecycle_kind` is enough,
+  and the consumer reconstructs the full event from the incident
+  repository at retry time (per P3.7).
+- The full target carries `SecretString` values that must not be
+  persisted; `target_kind` + `target_summary` captures the
+  not-sensitive shape.
+
+### P3.5 — Backoff per target kind
+
+Each notifier sender reports a transient outcome with an optional
+`retry_after` field that the protocol surfaces (Telegram's API field,
+Discord's `Retry-After` header, HTTP `Retry-After` for webhooks).
+When present, the scheduler uses it directly.
+
+When absent, fall back to per-kind defaults:
+
+| Target kind | Backoff schedule (default) |
+|---|---|
+| Telegram | `[30s, 120s, 600s]` |
+| Discord  | `[30s, 120s, 600s]` |
+| Webhook  | `[30s, 120s, 600s]` |
+| Stdout   | no retry (debug-only; failures are bugs) |
+
+Telegram's `retry_after` (from `parameters.retry_after` in the API
+error response) is honored when present; same for Discord's
+`Retry-After` header. If the protocol-supplied delay exceeds the
+default for that attempt number, use the protocol's value.
+
+### P3.6 — Max attempts: 3 retries (4 total)
+
+```rust
+// src/runtime/config.rs
+pub struct RuntimeConfig {
+    pub channel_capacity: usize,
+    pub shutdown_deadline_seconds: u64,
+    pub notification_max_retries: u32,     // default 3
+    pub notification_retry_tick_seconds: u64,  // default 10
+}
+```
+
+After the 3rd retry's `Transient` outcome, the attempt is marked
+`FailedPermanent` with `outcome_kind = 'Transient'` (the underlying
+cause was transient, but we've exhausted retries).
+
+### P3.7 — Retry scheduler in the consumer task
+
+The retry scheduler is an additional `tokio::select!` branch in the
+existing consumer task (ADR-S1, ADR-S3). No separate task, no new
+channels. The consumer's main loop:
+
+```rust
+let mut retry_ticker =
+    tokio::time::interval(Duration::from_secs(config.notification_retry_tick_seconds));
+retry_ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+loop {
+    tokio::select! {
+        Some(batch) = rx.recv() => {
+            // existing observation pipeline (ADR-S1)
+        }
+
+        _ = retry_ticker.tick() => {
+            let retryable = attempts_repo
+                .list_retryable(Utc::now(), 32)
+                .await
+                .unwrap_or_default();
+            for old_attempt in retryable {
+                self.process_retry(old_attempt).await;
+            }
+        }
+
+        _ = shutdown.recv() => break,
+    }
+}
+```
+
+`process_retry`:
+
+1. Loads the incident via `incident_repo.get(old_attempt.incident_id)`.
+2. Reconstructs the lifecycle event from `old_attempt.lifecycle_kind`
+   and the incident.
+3. Calls `compose_notification_message(&event)` (per P3.8 — message
+   regeneration).
+4. Calls `notifier.dispatch_one(rule, message, target)` (the
+   single-rule path, not the fan-out path).
+5. Persists a new attempt row via `insert_pending` then `complete`.
+
+The single-writer property (ADR-L4 §L4.4, ADR-S1) is preserved
+naturally — the retry path runs in the same task as the primary
+dispatch path.
+
+### P3.8 — Re-render messages from incident state on retry
+
+When a retry fires, the consumer re-renders the `NotificationMessage`
+from current incident state rather than persisting the original
+rendered message in the row. Reasons:
+
+- **Cleaner schema** — no `notification_message_json` column.
+- **Freshness** — if the incident has been updated (e.g. additional
+  evidence accumulated) since the original attempt, the retry carries
+  the latest summary.
+- **Determinism** — `compose_notification_message(event)` is pure;
+  same input produces the same output.
+
+Tradeoff: small drift between attempts on time-relative phrasing
+("opened 3m ago" → "opened 15m ago"). Operators benefit; nothing
+breaks.
+
+### P3.9 — Suppressed attempts are recorded
+
+When the V0.1 notifier drops a delivery because of a `SuppressionRule`
+(ADR-L5 §L5.4), it still constructs a `NotificationAttempt`:
+
+- `status = 'Suppressed'`
+- `outcome_kind = 'Suppressed'`
+- `outcome_json` carries `DeliveryOutcome::Suppressed { rule_id }`
+- No `next_retry_at` — suppressed deliveries are terminal, not retried.
+
+This is the audit trail ADR-L5 §L5.4 promised. The future operator UI
+displays "muted by rule X" for each suppressed attempt.
+
+### P3.10 — `Notifier::dispatch` signature change
+
+The current return type is `Vec<(NotificationRuleId, DeliveryReceipt)>`.
+ADR-P3 changes it to:
+
+```rust
+pub async fn dispatch(
+    &self,
+    event: &IncidentLifecycleEvent,
+    message: &NotificationMessage,
+    attempts_repo: &dyn NotificationAttemptRepository,
+    now: DateTime<Utc>,
+) -> Vec<NotificationAttempt>;
+```
+
+`Notifier::dispatch` internally:
+
+1. For each matching rule, build a `NotificationAttempt` with
+   `status = Pending` and `attempt_number = 1`.
+2. `insert_pending` for each.
+3. Call the appropriate sender.
+4. Build a `DeliveryReceipt`.
+5. Compute `next_retry_at` if the outcome is `Transient` and retries
+   remain.
+6. `complete` with the receipt + `next_retry_at`.
+7. Return the updated `NotificationAttempt` records.
+
+Returning `Vec<NotificationAttempt>` (not just receipts) lets the
+caller inspect retry state without re-reading the repository.
+
+### P3.11 — Retention
+
+`RetentionConfig` gains a fourth knob:
+
+```rust
+pub struct RetentionConfig {
+    pub observations_max_age:  Option<Duration>,
+    pub incidents_max_age:     Option<Duration>,
+    pub suppressions_grace:    Option<Duration>,
+    pub attempts_max_age:      Option<Duration>,   // NEW
+    pub vacuum_interval:       Duration,
+}
+```
+
+Default **30 days** — shorter than observations because attempts are
+denser (every notification produces a row, plus retry rows). The sweep
+in `retention::run` (ADR-P2 §P2.5) gains:
+
+```sql
+DELETE FROM notification_attempts
+WHERE attempted_at < ? AND status != 'Pending';
+```
+
+The `status != 'Pending'` guard prevents the sweep from deleting an
+in-flight attempt. (At V0 throughput a Pending row is gone within
+seconds; this is belt-and-suspenders against an exotic stuck-Pending.)
+
+### P3.12 — Module placement
+
+```text
+src/notifications/
+├── repository.rs                       # NEW — NotificationAttemptRepository trait + RepoError
+├── (existing modules unchanged)
+
+src/storage/sqlite/
+├── notification_attempt_repository.rs  # NEW — SqliteNotificationAttemptRepository
+
+src/storage/memory/
+├── notification_attempt_repository.rs  # NEW — MemoryNotificationAttemptRepository (tests)
+```
+
+Same pattern as `IncidentRepository` (`src/incidents/repository.rs`)
+and `SuppressionRepository` (`src/incidents/suppression.rs`).
+
+### Tickets
+
+Three new tickets plus one re-scope:
+
+- **BTH-51** — `NotificationAttemptRepository` trait + revised
+  `NotificationAttempt` struct + `MemoryNotificationAttemptRepository`
+  (S).
+- **BTH-52** — `SqliteNotificationAttemptRepository` + amend
+  `migrations/0001_initial.sql` with the table and four indexes (M).
+- **BTH-53** — Retry scheduler tick in the consumer task; backoff
+  defaults per target kind; max-attempts policy; suppressed-attempts
+  recording; `Notifier::dispatch` signature change to accept
+  `&dyn NotificationAttemptRepository` (M).
+
+Re-scopes:
+
+- **BTH-13** (retention task) — add `attempts_max_age` to
+  `RetentionConfig` and a fourth `DELETE` in the sweep.
+
+**Rationale.**
+
+- **Per-row immutability** sidesteps a class of state-machine bugs:
+  no row ever transitions between terminal states; retries always
+  produce fresh rows.
+- **Re-render on retry** keeps the schema small and messages fresh.
+- **Scheduler in the consumer** preserves ADR-S1's single-writer
+  property without new tasks or channels.
+- **Per-target-kind backoff with API-honored `retry_after`** matches
+  protocol contracts; uniform defaults are a fallback.
+- **Suppressed attempts are recorded as terminal-no-retry** so ADR-L5
+  §L5.4's audit promise is actually durable.
+
+**Alternatives considered.**
+
+- **Completed-only persistence with no retry** (the original V0
+  proposal): rejected on cost/benefit — durable retry is bounded
+  complexity and saves a future refactor.
+- **Mutable retry on the same row** (UPDATE `attempt_number` and
+  `status` in place): rejected — loses the per-row outcome history;
+  more locking; row identity loses meaning across retries.
+- **Persist the rendered `NotificationMessage`**: rejected — schema
+  bloat; messages can drift slightly on retry but operators benefit
+  from fresher info.
+- **Separate scheduler task**: rejected — breaks single-writer or
+  introduces an extra channel + sync layer for no real benefit at
+  V0 scale.
+
+**Spec updates queued.**
+
+- § 11.5 — note `Notifier::dispatch` signature change; `DeliveryOutcome`
+  now includes `Suppressed { rule_id }`.
+- § 11.x (new) — notification attempts model.
+- § 12.1 — consumer loop gains retry-ticker `select!` arm.
+- § 13.1–13.3 — schema includes `notification_attempts`; pool helper
+  unchanged.
+- § 13.4 — `NotificationAttemptRepository` added.
+- § 13.6 — retention config gains `attempts_max_age`.
+- § 15.b — `src/notifications/repository.rs`,
+  `src/storage/sqlite/notification_attempt_repository.rs`, and the
+  memory counterpart added.
+- § 21.5 / § 21.9 — inventory refreshed.
 
 
 

@@ -66,11 +66,17 @@ Estimate {S = ½–1 day, M = 1–2 days, L = 3–5 days}.
 | BTH-48| Promote `ActorId`; extend `IncidentCommand` (Ack/Resolve stubs)| D     | S        |
 | BTH-49| `SuppressionCommand` + `SuppressionService` trait              | D     | S        |
 | BTH-50| Per-context `events.rs` modules + top-level `DomainEvent`      | D     | M        |
+| BTH-51| `NotificationAttemptRepository` trait + revised `NotificationAttempt` + memory impl | 3 | S |
+| BTH-52| `SqliteNotificationAttemptRepository` + amend `0001_initial.sql` with `notification_attempts` table | 3 | M |
+| BTH-53| Retry scheduler tick + backoff defaults + `Notifier::dispatch` signature change | 10 | M |
 
 **Re-scopes from D-cluster (ADR-D4 supersedes ADR-L4 §L4.2):**
 - BTH-17 — was "IncidentCommand + HandleOutcome + EngineError"; now defines `IncidentEvent` (no `HandleOutcome`).
 - BTH-19 — was "engine handle decision tree returning HandleOutcome"; now returns `Vec<IncidentEvent>`.
 - BTH-35 — was "consumer reads outcome fields"; now consumer pattern-matches events.
+
+**Re-scopes from ADR-P3 (notification attempts persistence):**
+- BTH-13 — retention task gains `attempts_max_age` knob and a fourth `DELETE` in the sweep.
 
 **GitHub issue numbering note (BTH-42 onwards):** the BTH-N → GitHub
 issue-#N mapping holds for BTH-1 through BTH-41. From BTH-42 onwards
@@ -88,6 +94,12 @@ when the D-cluster issues were created:
 | BTH-48 | #55          |
 | BTH-49 | #56          |
 | BTH-50 | #57          |
+| BTH-51 | #63          |
+| BTH-52 | #64          |
+| BTH-53 | #65          |
+
+(PRs #58–#62 consumed the matching numbers when ADR-D4 docs / BTH-7 /
+BTH-8 / BTH-4-recover / CLAUDE.md-gotcha landed.)
 
 Issue bodies use the GitHub numbers (e.g. "Blocked by: #49 (BTH-42)")
 so cross-references resolve via GitHub autolinking.
@@ -1788,3 +1800,161 @@ and (later) cloud sync.
 - [ ] All events derive `Debug + Clone + Serialize` (cloud-sync-ready); `Deserialize` for round-trip
 - [ ] `cargo doc --no-deps` lists each events module
 - [ ] No runtime dispatch wired in this ticket — observation-only types
+
+---
+
+# Phase 3 (continued) — Notification attempts persistence
+
+Per ADR-P3. Three new tickets and one re-scope on BTH-13.
+
+## BTH-51: `NotificationAttemptRepository` trait + revised `NotificationAttempt` + memory impl
+
+**Type** Task • **Priority** High • **Estimate** S • **Component** notifications + storage
+**ADRs** **P3** (§§P3.3, P3.4) • **Blocked by** #1 • **Blocks** #64 (BTH-52), #65 (BTH-53)
+
+### Description
+
+Add `src/notifications/repository.rs` with the trait and revise the existing `NotificationAttempt` struct to carry retry state.
+
+```rust
+// src/notifications/repository.rs
+#[async_trait]
+pub trait NotificationAttemptRepository: Send + Sync {
+    async fn insert_pending(&self, attempt: &NotificationAttempt) -> Result<(), RepoError>;
+    async fn complete(
+        &self,
+        id: &NotificationAttemptId,
+        receipt: DeliveryReceipt,
+        next_retry_at: Option<DateTime<Utc>>,
+    ) -> Result<(), RepoError>;
+    async fn list_retryable(
+        &self,
+        now: DateTime<Utc>,
+        limit: u32,
+    ) -> Result<Vec<NotificationAttempt>, RepoError>;
+    async fn list_for_incident(
+        &self,
+        incident_id: &IncidentId,
+    ) -> Result<Vec<NotificationAttempt>, RepoError>;
+}
+```
+
+Revise `NotificationAttempt`:
+
+- Remove `incident_lifecycle_event: IncidentLifecycleEvent` (duplicates incidents rows).
+- Remove `target: NotificationTarget` (carries `SecretString` — must not be persisted).
+- Add `incident_id: IncidentId`, `lifecycle_kind: IncidentNotificationEventKind`.
+- Add `target_kind: TargetKind` (enum: Telegram/Discord/Webhook/Stdout) and `target_summary: String` (redacted).
+- Add `attempt_number: u32`, `parent_attempt_id: Option<NotificationAttemptId>`, `next_retry_at: Option<DateTime<Utc>>`.
+- Replace `error: Option<String>` with `outcome: Option<DeliveryOutcome>` + `external_ref: Option<ExternalMessageRef>`.
+
+Expand `NotificationDeliveryStatus`: `Pending`, `Succeeded`, `FailedTransient`, `FailedPermanent`, `Suppressed`.
+
+Add `MemoryNotificationAttemptRepository` (test impl) under `src/storage/memory/`.
+
+### Acceptance criteria
+
+- [ ] Trait + revised struct + `TargetKind` enum compile with doc-comments
+- [ ] `MemoryNotificationAttemptRepository` implements the trait
+- [ ] Trait conformance test suite shared with the SQLite impl
+- [ ] Round-trip test: insert pending, complete, list_retryable returns the row when `next_retry_at <= now`, doesn't return it when `now < next_retry_at`
+- [ ] `target_summary` redaction sketches: `telegram:chat_id=N`, `discord:webhook=host=H`, `webhook:host=H`, `stdout`
+
+---
+
+## BTH-52: `SqliteNotificationAttemptRepository` + schema amendment
+
+**Type** Task • **Priority** High • **Estimate** M • **Component** storage
+**ADRs** **P3** (§§P3.2, P3.3) • **Blocked by** #9 (BTH-9), #63 (BTH-51) • **Blocks** #65 (BTH-53)
+
+### Description
+
+Amend `migrations/0001_initial.sql` with the `notification_attempts` table (per ADR-P3 §P3.2 DDL) and add `SqliteNotificationAttemptRepository` in `src/storage/sqlite/notification_attempt_repository.rs`.
+
+Implement:
+- `insert_pending`: INSERT with all retry-state columns.
+- `complete`: UPDATE the row from `Pending` to a terminal status; set `next_retry_at` per the passed value.
+- `list_retryable`: SELECT WHERE `status = 'FailedTransient' AND next_retry_at <= ?` ORDER BY `next_retry_at` LIMIT `?`.
+- `list_for_incident`: SELECT WHERE `incident_id = ?` ORDER BY `attempted_at DESC`.
+
+### Acceptance criteria
+
+- [ ] `notification_attempts` table created with all columns + 4 indexes per ADR-P3 §P3.2
+- [ ] `STRICT` keyword present
+- [ ] Trait conformance suite (from BTH-51) passes
+- [ ] Round-trip test for every `DeliveryOutcome` variant via `outcome_json`
+- [ ] `external_ref_json` round-trips through `ExternalMessageRef` for Telegram + Discord
+- [ ] Test: `list_retryable` is index-using (check with `EXPLAIN QUERY PLAN`)
+- [ ] Migration is idempotent (re-running the migrate step doesn't fail)
+
+---
+
+## BTH-53: Retry scheduler + `Notifier::dispatch` signature change + backoff defaults
+
+**Type** Story • **Priority** High • **Estimate** M • **Component** runtime + notifications
+**ADRs** **P3** (§§P3.5, P3.6, P3.7, P3.8, P3.9, P3.10) • **Blocked by** #63 (BTH-51), #64 (BTH-52), #35 (BTH-35) • **Blocks** —
+
+### Description
+
+Three coordinated changes:
+
+1. **`Notifier::dispatch` signature change** (ADR-P3 §P3.10):
+   ```rust
+   pub async fn dispatch(
+       &self,
+       event: &IncidentLifecycleEvent,
+       message: &NotificationMessage,
+       attempts_repo: &dyn NotificationAttemptRepository,
+       now: DateTime<Utc>,
+   ) -> Vec<NotificationAttempt>;
+   ```
+   Internally: for each matching rule, INSERT `Pending`, call sender, UPDATE with receipt + `next_retry_at`.
+
+2. **Retry scheduler tick in `runtime::consumer`** (ADR-P3 §P3.7): add a `tokio::time::interval` (10s default, configurable via `RuntimeConfig::notification_retry_tick_seconds`) as a third `select!` arm. On tick: `list_retryable`, reconstruct event from incident + lifecycle_kind, re-render message, call `notifier.retry_one`.
+
+3. **Backoff defaults per target kind** (ADR-P3 §P3.5): when the protocol surfaces a `retry_after`, honor it; otherwise use `[30s, 120s, 600s]` for Telegram/Discord/Webhook and no-retry for Stdout. Max 3 retries (4 total attempts) — configurable via `RuntimeConfig::notification_max_retries`.
+
+### Acceptance criteria
+
+- [ ] `Notifier::dispatch` matches the new signature
+- [ ] Initial dispatch inserts `Pending` and updates to terminal status in one logical sequence
+- [ ] Transient outcome with retries remaining sets `next_retry_at` and status `FailedTransient`
+- [ ] Transient outcome with retries exhausted sets status `FailedPermanent` with `outcome_kind = 'Transient'`
+- [ ] Permanent / Delivered / Suppressed outcomes set terminal status with `next_retry_at = NULL`
+- [ ] Suppressed deliveries (when ADR-L5 suppression is wired) get recorded with `status = 'Suppressed'`
+- [ ] Retry tick picks up retryable rows, inserts new row with `attempt_number + 1` and `parent_attempt_id` set
+- [ ] Message is re-rendered from current incident state at retry time (per ADR-P3 §P3.8) — test asserts that an incident updated between attempts produces a different rendered title/summary
+- [ ] Protocol-supplied `retry_after` overrides default backoff (test with mock Telegram response carrying `parameters.retry_after = 60`)
+- [ ] Stdout target never retries
+- [ ] Consumer task shutdown drains the retry tick cleanly
+
+---
+
+## Re-scope: BTH-13 (retention task)
+
+**Re-scoped by ADR-P3 §P3.11.**
+
+`RetentionConfig` gains a fourth knob:
+
+```rust
+pub struct RetentionConfig {
+    pub observations_max_age:  Option<Duration>,
+    pub incidents_max_age:     Option<Duration>,
+    pub suppressions_grace:    Option<Duration>,
+    pub attempts_max_age:      Option<Duration>,   // NEW (default 30 days)
+    pub vacuum_interval:       Duration,
+}
+```
+
+The sweep gains a fourth `DELETE`:
+
+```sql
+DELETE FROM notification_attempts
+WHERE attempted_at < ? AND status != 'Pending';
+```
+
+`status != 'Pending'` guards against deleting an in-flight attempt. Updated acceptance criteria on BTH-13:
+
+- [ ] `RetentionConfig` has the new field with default `Some(Duration::from_days(30))`
+- [ ] Test: completed attempts older than `attempts_max_age` are deleted
+- [ ] Test: `Pending` rows are never deleted, even if older than the threshold
