@@ -1,4 +1,31 @@
 //! Incident engine — fingerprinting, lifecycle, command handling.
-//!
-//! Implementation lands in BTH-17 (types), BTH-18 (struct + new),
-//! and BTH-19 (handle decision tree). See ADRs L1–L4 in `SPEC.md`.
+
+use chrono::{DateTime, Utc};
+
+use crate::{
+    diagnostics::types::IncidentSignalDraft,
+    incidents::kinds::DraftError,
+    shared::types::{ActorId, IncidentId},
+};
+
+#[derive(Debug, Clone)]
+pub enum IncidentCommand {
+    RecordSignal(IncidentSignalDraft),
+    Acknowledge {
+        id: IncidentId,
+        by: ActorId,
+        at: DateTime<Utc>,
+    },
+    Resolve {
+        id: IncidentId,
+        by: ActorId,
+        at: DateTime<Utc>,
+        reason: String,
+    },
+}
+
+#[derive(Debug)]
+pub enum EngineError {
+    Draft(DraftError),
+    NotYetImplemented(&'static str),
+}
