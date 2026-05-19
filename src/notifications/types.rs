@@ -69,12 +69,11 @@ pub struct NotificationMessage {
 
 /// Persisted record of a notification dispatch attempt.
 ///
-/// Per ADR-P3 §§P3.1, P3.4: per-row immutable. Initial dispatch inserts
-/// the row with `status = Pending`, then a single UPDATE moves it to a
-/// terminal status. Retries don't mutate the row — they INSERT a new one
-/// with `attempt_number + 1` and `parent_attempt_id` pointing back. In
-/// V0 the retry path is unused (audit-only); `next_retry_at` is always
-/// `None`.
+/// Per-row immutable: initial dispatch inserts the row with
+/// `status = Pending`, then a single UPDATE moves it to a terminal status.
+/// Retries don't mutate the row — they INSERT a new one with
+/// `attempt_number + 1` and `parent_attempt_id` pointing back. In V0 the
+/// retry path is unused (audit-only); `next_retry_at` is always `None`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationAttempt {
     pub id: NotificationAttemptId,
@@ -85,9 +84,9 @@ pub struct NotificationAttempt {
     pub target_kind: TargetKind,
     /// Human-readable, redacted target description.
     ///
-    /// Per ADR-P3 §P3.2: full targets carry `SecretString`; those are
-    /// never persisted. The summary uses sketches like
-    /// `telegram:chat_id=-1001234` or `webhook:host=ops.example.com`.
+    /// Full targets carry `SecretString`; those are never persisted. The
+    /// summary uses sketches like `telegram:chat_id=-1001234` or
+    /// `webhook:host=ops.example.com`.
     pub target_summary: String,
 
     pub status: NotificationDeliveryStatus,
@@ -106,8 +105,8 @@ pub struct NotificationAttempt {
 
 /// Discriminant for the target a [`NotificationAttempt`] dispatched to.
 ///
-/// Per ADR-P3 §P3.4: pulled out of the persisted form so that the secret
-/// material in [`NotificationTarget`] never reaches storage.
+/// Pulled out of the persisted form so that the secret material in
+/// [`NotificationTarget`] never reaches storage.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TargetKind {
     Telegram,
@@ -119,8 +118,8 @@ pub enum TargetKind {
 
 impl TargetKind {
     /// Convert a live [`NotificationTarget`] into its persistable
-    /// `(TargetKind, target_summary)` pair. Redaction sketches per
-    /// ADR-P3 §P3.2 — none of these contain the underlying secret.
+    /// `(TargetKind, target_summary)` pair. None of these contain the
+    /// underlying secret.
     pub fn summarize(target: &NotificationTarget) -> (Self, String) {
         match target {
             #[cfg(debug_assertions)]
@@ -183,17 +182,15 @@ pub enum NotificationKind {
 pub enum NotificationDeliveryStatus {
     Pending,
     Succeeded,
-    /// Per ADR-P3 §P3.1: terminal-for-this-row; the row stays at this
-    /// status while the retry scheduler (V0.1) creates a new row with
-    /// `attempt_number + 1`. In V0 (audit-only) this state is unused —
-    /// see the §P3 revision note: a protocol-level transient that exhausts
-    /// retries in V0 lands as `FailedPermanent` with
+    /// Terminal-for-this-row; the row stays at this status while the V0.1
+    /// retry scheduler creates a new row with `attempt_number + 1`. In V0
+    /// (audit-only) this state is unused — a protocol-level transient that
+    /// exhausts retries in V0 lands as `FailedPermanent` with
     /// `outcome_kind = 'Transient'`.
     FailedTransient,
     FailedPermanent,
-    /// Per ADR-L5 §L5.4 and ADR-P3 §P3.9: dispatch dropped by a
-    /// suppression rule. Recorded with `DeliveryOutcome::Suppressed`
-    /// in `outcome_json` for audit.
+    /// Dispatch dropped by a suppression rule. Recorded with
+    /// `DeliveryOutcome::Suppressed` in `outcome_json` for audit.
     Suppressed,
 }
 

@@ -1,4 +1,4 @@
-//! `NotificationAttemptRepository` trait per ADR-P3 §P3.3.
+//! `NotificationAttemptRepository` trait.
 //!
 //! SQLite impl lives in `crate::storage::sqlite::notification_attempt_repository`
 //! (BTH-52); the in-memory test impl lives under `crate::storage::memory`.

@@ -89,9 +89,9 @@ impl NotificationAttemptRepository for MemoryNotificationAttemptRepository {
     }
 }
 
-/// Per ADR-P3 §P3.1: terminal status follows the outcome, except a Transient
-/// with retries remaining stays FailedTransient (V0.1+), and a Transient
-/// without remaining retries is FailedPermanent (V0 always hits this branch).
+/// Terminal status follows the outcome, except a Transient with retries
+/// remaining stays FailedTransient (V0.1+), and a Transient without
+/// remaining retries is FailedPermanent (V0 always hits this branch).
 fn status_for_outcome(
     outcome: &DeliveryOutcome,
     will_retry: bool,
