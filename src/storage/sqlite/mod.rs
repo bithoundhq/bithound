@@ -1,9 +1,11 @@
 //! SQLite backend per ADR-P1.
 
 pub mod incident_repository;
+pub mod notification_attempt_repository;
 pub mod observation_store;
 
 pub use incident_repository::SqliteIncidentRepository;
+pub use notification_attempt_repository::SqliteNotificationAttemptRepository;
 pub use observation_store::SqliteObservationStore;
 
 use std::path::Path;
@@ -66,6 +68,7 @@ mod tests {
             tables,
             vec![
                 "incidents".to_string(),
+                "notification_attempts".to_string(),
                 "observations".to_string(),
                 "suppression_rules".to_string(),
             ]
