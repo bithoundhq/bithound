@@ -1,4 +1,4 @@
-//! `SqliteNotificationAttemptRepository` per ADR-P3 §P3.2, §P3.3.
+//! `SqliteNotificationAttemptRepository`.
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};

@@ -51,8 +51,8 @@ CREATE TABLE suppression_rules (
 CREATE INDEX idx_supp_fingerprint ON suppression_rules (fingerprint, until);
 CREATE INDEX idx_supp_until       ON suppression_rules (until);
 
--- ADR-P3 §P3.2: notification attempts (audit-only in V0; retry queue is V0.1).
--- Retry columns are retained for forward compatibility and unused under V0.
+-- Notification attempts (audit-only in V0; retry queue is V0.1). Retry
+-- columns are retained for forward compatibility and unused under V0.
 CREATE TABLE notification_attempts (
     id                BLOB PRIMARY KEY,
     rule_id           BLOB NOT NULL,
