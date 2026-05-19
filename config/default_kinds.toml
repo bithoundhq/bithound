@@ -1,5 +1,54 @@
 # Built-in incident kinds, embedded in the binary via `include_str!` from
 # `src/incidents/kinds.rs`. The user catalog (loaded separately) may add new
 # kinds but may not override entries listed here.
+#
+# When adding, renaming, or removing a kind, also update
+# `src/incidents/well_known.rs`. A parity test in that module enforces it.
 
-kinds = []
+[[kinds]]
+name = "bitcoin.tip_lag"
+allowed_subjects = ["BitcoinNode"]
+allows_dimension = false
+
+[[kinds]]
+name = "bitcoin.ibd_stall"
+allowed_subjects = ["BitcoinNode"]
+allows_dimension = false
+
+[[kinds]]
+name = "bitcoin.peer_starvation"
+allowed_subjects = ["BitcoinNode"]
+allows_dimension = false
+
+[[kinds]]
+name = "bitcoin.mempool_full"
+allowed_subjects = ["BitcoinNode"]
+allows_dimension = false
+
+[[kinds]]
+name = "bitcoin.reorg_deep"
+allowed_subjects = ["BitcoinNode"]
+allows_dimension = false
+
+[[kinds]]
+name = "host.disk_exhaustion"
+allowed_subjects = ["Host"]
+allows_dimension = true
+dimension_label = "mount_path"
+
+[[kinds]]
+name = "lnd.channel_inactive"
+allowed_subjects = ["LndChannel"]
+allows_dimension = false
+
+[[kinds]]
+name = "lnd.htlc_stuck"
+allowed_subjects = ["LndChannel"]
+allows_dimension = true
+dimension_label = "payment_hash"
+
+[[kinds]]
+name = "sidecar.collector_failing"
+allowed_subjects = ["Host"]
+allows_dimension = true
+dimension_label = "collector_id"

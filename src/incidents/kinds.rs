@@ -100,6 +100,19 @@ impl KindRegistry {
         self.kinds.get(kind)
     }
 
+    /// Iterate over every registered kind spec. Order is unspecified.
+    pub fn iter(&self) -> impl Iterator<Item = &IncidentKindSpec> {
+        self.kinds.values()
+    }
+
+    pub fn len(&self) -> usize {
+        self.kinds.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.kinds.is_empty()
+    }
+
     /// Validate a draft against the registry — used by the engine on every
     /// incoming draft. On error, the engine must reject the draft without
     /// mutating any incident state.
