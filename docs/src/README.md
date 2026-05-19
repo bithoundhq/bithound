@@ -24,11 +24,12 @@ or a webhook.
 
 ## Source-of-truth documents
 
-The canonical design docs live in the repository root and have not (yet)
-been folded into this site. Until they are, please read them directly:
+The ADRs now live in this site under
+[Architecture decision records](adr/index.md). The remaining
+domain-spec and planning documents still live alongside the code:
 
 - [`SPEC.md`](https://github.com/bithoundhq/bithound/blob/main/SPEC.md) —
-  domain spec plus the accepted ADRs.
+  domain spec, §§ 1–22. § 23 is a pointer to the ADRs in this site.
 - [`IMPLEMENTATION_PLAN.md`](https://github.com/bithoundhq/bithound/blob/main/IMPLEMENTATION_PLAN.md) —
   phase structure, dependency graph, milestones.
 - [`TICKETS.md`](https://github.com/bithoundhq/bithound/blob/main/TICKETS.md) —

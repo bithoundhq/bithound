@@ -10,20 +10,22 @@ Before doing architecture-affecting work, read these documents in
 order:
 
 1. [`SPEC.md`](https://github.com/bithoundhq/bithound/blob/main/SPEC.md) —
-   the domain spec plus the accepted ADRs. Every architectural decision
-   is captured here. **Code that contradicts an ADR must be rejected
-   (the PR should reference the ADR first).**
-2. [`IMPLEMENTATION_PLAN.md`](https://github.com/bithoundhq/bithound/blob/main/IMPLEMENTATION_PLAN.md) —
+   the domain spec (§§ 1–22). § 23 points into this site for the ADRs.
+2. [Architecture decision records](../adr/index.md) — every accepted
+   ADR, grouped by cluster. **Code that contradicts an ADR must be
+   rejected** (the PR should reference the ADR first).
+3. [`IMPLEMENTATION_PLAN.md`](https://github.com/bithoundhq/bithound/blob/main/IMPLEMENTATION_PLAN.md) —
    phase structure, dependency graph, milestones, project-wide
    conventions.
-3. [`TICKETS.md`](https://github.com/bithoundhq/bithound/blob/main/TICKETS.md) —
+4. [`TICKETS.md`](https://github.com/bithoundhq/bithound/blob/main/TICKETS.md) —
    the BTH tickets, each with the ADRs it implements, acceptance
    criteria, and `Blocked by` / `Blocks` links.
-4. [`docs/INCIDENT_CATALOG.md`](https://github.com/bithoundhq/bithound/blob/main/docs/INCIDENT_CATALOG.md) —
+5. [`docs/INCIDENT_CATALOG.md`](https://github.com/bithoundhq/bithound/blob/main/docs/INCIDENT_CATALOG.md) —
    the diagnostic backlog.
 
-If a ticket forces a decision the ADRs don't cover, **stop and append
-a new ADR** to `SPEC.md` § 23 before coding. Don't extend the
+If a ticket forces a decision the ADRs don't cover, **stop and write
+a new ADR** under `docs/src/adr/` before coding, then link it from
+`docs/src/adr/index.md` and `docs/src/SUMMARY.md`. Don't extend the
 architecture by precedent.
 
 ## Picking up work
