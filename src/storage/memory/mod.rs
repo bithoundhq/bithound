@@ -1,4 +1,4 @@
-//! In-memory storage impls for tests per ADR-P2 §P2.7.
+//! In-memory storage impls for tests.
 
 pub mod incident_repository;
 pub mod observation_store;
