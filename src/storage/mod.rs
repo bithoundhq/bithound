@@ -4,6 +4,7 @@
 //! configured `SqlitePool` (WAL + NORMAL + migrations applied). Concrete
 //! repository implementations live under [`sqlite`].
 
+pub mod memory;
 pub mod retention;
 pub mod sqlite;
 pub mod traits;
