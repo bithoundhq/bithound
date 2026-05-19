@@ -32,6 +32,19 @@ impl ObservationBatchId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ActorId(pub String);
+
+impl ActorId {
+    pub fn system() -> Self {
+        Self("system".into())
+    }
+
+    pub fn operator(name: impl Into<String>) -> Self {
+        Self(name.into())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SidecarId(pub Uuid);
 
 /// Evidence should reference observations.
@@ -73,8 +86,8 @@ pub enum EntityRef {
 /// Named discriminant for [`EntityRef`].
 ///
 /// Used by [`crate::incidents::kinds::IncidentKindSpec::allowed_subjects`]
-/// (designed in ADR-L1 §3) to declare which subject kinds a given incident
-/// kind permits. The named-enum form is preferred over `std::mem::discriminant`
+/// to declare which subject kinds a given incident kind permits.
+/// The named-enum form is preferred over `std::mem::discriminant`
 /// because it is greppable, serializable, and the exhaustive `match` in
 /// [`EntityRef::subject_kind`] turns into a compile error if a new
 /// [`EntityRef`] variant is added without updating both.
@@ -111,10 +124,7 @@ mod tests {
     #[test]
     fn entity_ref_subject_kind_matches_variant() {
         let pairs: [(EntityRef, EntitySubjectKind); 7] = [
-            (
-                EntityRef::Host(HostId("h".into())),
-                EntitySubjectKind::Host,
-            ),
+            (EntityRef::Host(HostId("h".into())), EntitySubjectKind::Host),
             (
                 EntityRef::BitcoinNode(BitcoinNodeId("n".into())),
                 EntitySubjectKind::BitcoinNode,
