@@ -1,0 +1,5 @@
+# Built-in incident kinds, embedded in the binary via `include_str!` from
+# `src/incidents/kinds.rs`. The user catalog (loaded separately) may add new
+# kinds but may not override entries listed here.
+
+kinds = []
