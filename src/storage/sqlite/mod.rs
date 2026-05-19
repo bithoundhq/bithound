@@ -1,5 +1,9 @@
 //! SQLite backend per ADR-P1.
 
+pub mod observation_store;
+
+pub use observation_store::SqliteObservationStore;
+
 use std::path::Path;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
