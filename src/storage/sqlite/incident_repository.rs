@@ -1,4 +1,4 @@
-//! `SqliteIncidentRepository` per ADR-P2 §P2.2.
+//! `SqliteIncidentRepository`.
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};

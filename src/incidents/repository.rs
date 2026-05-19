@@ -1,4 +1,4 @@
-//! `IncidentRepository` trait per ADR-L4 §L4.6.
+//! `IncidentRepository` trait.
 //!
 //! Concrete SQLite impl lives in `crate::storage::sqlite::incident_repository`;
 //! the in-memory test impl lives under `crate::storage::memory`.
@@ -12,8 +12,8 @@ use crate::shared::types::IncidentId;
 pub trait IncidentRepository: Send + Sync {
     /// Load every incident whose status is not `Resolved`.
     ///
-    /// Used at startup by the runtime (per ADR-S2) to hydrate the engine's
-    /// open-incident map.
+    /// Used at startup by the runtime to hydrate the engine's open-incident
+    /// map.
     async fn load_open(&self) -> Result<Vec<Incident>, RepoError>;
 
     /// Upsert the incident — INSERT on new id, UPDATE on existing id, all
