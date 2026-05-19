@@ -1,10 +1,10 @@
-//! `SqliteObservationStore` per ADR-P1, ADR-P2 §P2.3.
+//! `SqliteObservationStore`.
 //!
 //! Hot fields (id, timestamps, subject, source, origin, payload kind) are
-//! stored in indexed columns; full payload + attributes ride along as JSON
-//! per ADR-P1 §13. The `integration` column also holds JSON so the
-//! [`IntegrationKind`] interval survives round-trip — the column's
-//! discriminant is implicit in the JSON tag and remains greppable.
+//! stored in indexed columns; full payload + attributes ride along as JSON.
+//! The `integration` column also holds JSON so the [`IntegrationKind`]
+//! interval survives round-trip — the column's discriminant is implicit in
+//! the JSON tag and remains greppable.
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
