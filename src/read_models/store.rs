@@ -367,6 +367,41 @@ mod tests {
             &IncidentKind("bitcoin.tip_lag".into()),
         );
         assert_eq!(active_for_kind.len(), 1);
+
+        // Delegation coverage for the remaining trait methods — each is a
+        // 1-line proxy whose underlying projection method is exercised in
+        // its own BTH-21..24 test module. These assertions cover the
+        // delegation itself against populated state.
+        let states = StateReadModel::states_for(&store, &alice);
+        assert_eq!(states.len(), 1);
+
+        let samples = MetricReadModel::metric_samples_since(
+            &store,
+            &alice,
+            &MetricName("peer_count".into()),
+            t0() - ChronoDuration::seconds(1),
+        );
+        assert_eq!(samples.len(), 1);
+
+        let unchanged = MetricReadModel::unchanged_for(
+            &store,
+            &alice,
+            &MetricName("peer_count".into()),
+        )
+        .expect("series populated");
+        assert_eq!(unchanged.len(), 1);
+
+        let caps = CapabilityReadModel::capabilities_for(&store, &alice);
+        assert_eq!(caps.len(), 1);
+
+        let hbs = HeartbeatReadModel::heartbeats_since(
+            &store,
+            t0() - ChronoDuration::seconds(1),
+        );
+        assert_eq!(hbs.len(), 1);
+
+        let active = IncidentSignalReadModel::active_signals_for(&store, &alice);
+        assert_eq!(active.len(), 1);
     }
 
     #[test]
