@@ -1,6 +1,7 @@
 //! Incident engine — fingerprinting, lifecycle, command handling.
 
 use chrono::{DateTime, Utc};
+use thiserror::Error;
 
 use crate::{
     diagnostics::types::IncidentSignalDraft,
@@ -24,8 +25,10 @@ pub enum IncidentCommand {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum EngineError {
-    Draft(DraftError),
+    #[error("draft validation: {0}")]
+    Draft(#[from] DraftError),
+    #[error("command not yet implemented: {0}")]
     NotYetImplemented(&'static str),
 }

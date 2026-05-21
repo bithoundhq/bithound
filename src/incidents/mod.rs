@@ -1,4 +1,5 @@
 pub mod engine;
+pub mod events;
 pub mod kinds;
 pub mod repository;
 mod types;
