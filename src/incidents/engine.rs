@@ -224,6 +224,7 @@ impl IncidentEngine {
         };
         let signal = IncidentSignalObservation {
             signal: draft.signal.clone(),
+            incident_kind: draft.kind.clone(),
             severity: draft.severity.clone(),
             status: draft.status.clone(),
             confidence: draft.confidence.clone(),

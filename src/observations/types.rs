@@ -401,6 +401,7 @@ mod tests {
     fn incident_signal_payload_roundtrips_via_serde() {
         let signal = IncidentSignalObservation {
             signal: SignalName("bitcoin.no_peers".into()),
+            incident_kind: crate::incidents::IncidentKind("bitcoin.no_peers".into()),
             severity: SignalSeverity::Critical,
             status: SignalStatus::Active,
             confidence: Confidence::High,
