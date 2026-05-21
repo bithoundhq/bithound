@@ -5,8 +5,10 @@
 //! ingestion surface; each variant of `ObservationPayload` has at most
 //! one projection that cares about it.
 
+pub mod metric;
 pub mod state;
 
+pub use metric::{MetricProjection, DEFAULT_METRIC_SERIES_CAPACITY};
 pub use state::StateProjection;
 
 use thiserror::Error;
