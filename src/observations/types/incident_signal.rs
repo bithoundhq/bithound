@@ -2,26 +2,20 @@
 //! Take note that these are not incidents per se.
 use serde::{Deserialize, Serialize};
 
+use crate::incidents::IncidentKind;
 use crate::shared::types::*;
 
 /// Incident signals are derived detection primitives.
 /// They are not to be confused with full incidents themselves.
-/// # Example
-/// ```
-/// IncidentSignalObservation {
-///     signal: SignalName("bitcoin.no_peers".into()),
-///     severity: SignalSeverity::Critical,
-///     status: SignalStatus::Active,
-///     confidence: Confidence::High,
-///     evidence: vec![
-///         EvidenceRef(peer_count_metric_observation_id),
-///         EvidenceRef(bitcoin_network_state_observation_id)
-///     ]
-/// }
-/// ```
+///
+/// `incident_kind` records which incident kind this signal contributes
+/// to, so the read-model layer can answer `active_signals_for_incident_kind`
+/// without re-deriving the mapping. The engine populates it from the
+/// originating `IncidentSignalDraft::kind`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IncidentSignalObservation {
     pub signal: SignalName,
+    pub incident_kind: IncidentKind,
     pub severity: SignalSeverity,
     pub status: SignalStatus,
     pub confidence: Confidence,
