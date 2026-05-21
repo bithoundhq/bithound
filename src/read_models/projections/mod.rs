@@ -5,6 +5,10 @@
 //! ingestion surface; each variant of `ObservationPayload` has at most
 //! one projection that cares about it.
 
+pub mod state;
+
+pub use state::StateProjection;
+
 use thiserror::Error;
 
 use crate::observations::Observation;
