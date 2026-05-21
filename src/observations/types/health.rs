@@ -43,7 +43,7 @@ pub struct CollectorStatus {
     pub last_error_code: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct HealthTargetId(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

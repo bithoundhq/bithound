@@ -5,6 +5,20 @@
 //! ingestion surface; each variant of `ObservationPayload` has at most
 //! one projection that cares about it.
 
+pub mod capability;
+pub mod health;
+pub mod heartbeat;
+pub mod incident_signal;
+pub mod metric;
+pub mod state;
+
+pub use capability::CapabilityProjection;
+pub use health::HealthProjection;
+pub use heartbeat::{HeartbeatProjection, DEFAULT_HEARTBEAT_CAPACITY};
+pub use incident_signal::IncidentSignalProjection;
+pub use metric::{MetricProjection, DEFAULT_METRIC_SERIES_CAPACITY};
+pub use state::StateProjection;
+
 use thiserror::Error;
 
 use crate::observations::Observation;
