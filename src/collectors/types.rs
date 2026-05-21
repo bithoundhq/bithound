@@ -2,13 +2,14 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::shared::types::{BitcoinNodeId, CollectorId, HostId, LndNodeId};
+use crate::shared::types::{BitcoinNodeId, CollectorId, HostId, LndNodeId, SidecarId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CollectionRunId(pub Uuid);
 
 #[derive(Debug, Clone)]
 pub struct CollectionContext {
+    pub sidecar_id: SidecarId,
     pub collector_id: CollectorId,
     pub target: CollectorTarget,
     pub now: DateTime<Utc>,
