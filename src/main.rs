@@ -12,6 +12,7 @@ mod notifications;
 mod observations;
 mod read_models;
 mod rpc;
+mod runtime;
 mod shared;
 mod storage;
 
