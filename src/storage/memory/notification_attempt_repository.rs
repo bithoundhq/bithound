@@ -84,7 +84,7 @@ impl NotificationAttemptRepository for MemoryNotificationAttemptRepository {
             .filter(|a| &a.incident_id == incident_id)
             .cloned()
             .collect();
-        out.sort_by(|a, b| b.attempted_at.cmp(&a.attempted_at));
+        out.sort_by_key(|a| std::cmp::Reverse(a.attempted_at));
         Ok(out)
     }
 }
