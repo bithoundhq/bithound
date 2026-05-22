@@ -54,9 +54,11 @@ pub struct WebhookSinkConfig {}
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NotificationRuleConfig {
-    /// UUIDv7 stable identifier. Operator-supplied so two sidecars
-    /// running the same config produce comparable rule histories.
-    pub id: uuid::Uuid,
+    /// Operator-supplied stable slug, e.g. `"critical-to-telegram"`.
+    /// Follows the same shape as `CollectorId` / `BitcoinNodeId`:
+    /// short, human-readable, unique per sidecar. Shows up in audit
+    /// logs and incident attribution as written.
+    pub id: String,
     pub name: String,
     pub enabled: bool,
     pub min_severity: SeverityConfig,

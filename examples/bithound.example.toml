@@ -59,9 +59,13 @@ parse_mode = "html"
 [notifications.webhook]
 # Same idea as [notifications.discord].
 
+# `id` is an operator-picked slug. Keep it short, lowercase-hyphenated,
+# and unique within this file — it shows up in audit logs and incident
+# attribution exactly as written.
+
 [[notification_rules]]
-id = "00000000-0000-7000-8000-000000000001"
-name = "critical-to-telegram"
+id = "critical-to-telegram"
+name = "Critical incidents → Telegram"
 enabled = true
 min_severity = "critical"
 event_kinds = []   # empty = all kinds
@@ -71,8 +75,8 @@ type = "telegram"
 chat_id = -1001234567890
 
 [[notification_rules]]
-id = "00000000-0000-7000-8000-000000000002"
-name = "warnings-to-discord-ops"
+id = "warnings-to-discord-ops"
+name = "Warnings → Discord #ops"
 enabled = true
 min_severity = "warning"
 event_kinds = []
@@ -83,8 +87,8 @@ webhook_env = "BITHOUND_OPS_DISCORD_WEBHOOK"
 # thread_id = 1234567890123456789  # optional — omit to post in the channel itself
 
 [[notification_rules]]
-id = "00000000-0000-7000-8000-000000000003"
-name = "critical-to-pagerduty"
+id = "critical-to-pagerduty"
+name = "Critical incidents → PagerDuty"
 enabled = true
 min_severity = "critical"
 event_kinds = []

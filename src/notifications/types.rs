@@ -15,14 +15,12 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NotificationId(pub Uuid);
 
+/// Operator-supplied stable slug for a notification rule. Follows
+/// the same convention as `CollectorId` and `BitcoinNodeId`: the
+/// operator picks a short, human-readable string that stays the
+/// same across config reloads and shows up directly in audit logs.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct NotificationRuleId(pub Uuid);
-
-impl NotificationRuleId {
-    pub fn new() -> Self {
-        Self(Uuid::now_v7())
-    }
-}
+pub struct NotificationRuleId(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NotificationAttemptId(pub Uuid);

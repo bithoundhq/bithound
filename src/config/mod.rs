@@ -321,11 +321,11 @@ fn validate_cross_refs(config: &Config) -> Result<(), ConfigError> {
         }
     }
 
-    let mut rule_ids: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
+    let mut rule_ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for r in &config.notification_rules {
-        if !rule_ids.insert(r.id) {
+        if !rule_ids.insert(r.id.as_str()) {
             return Err(ConfigError::Invalid(format!(
-                "duplicate notification_rules.id {}",
+                "duplicate notification_rules.id {:?}",
                 r.id
             )));
         }
