@@ -51,7 +51,7 @@ pub enum RuntimeError {
 /// Spin everything up, run until SIGINT/SIGTERM, then drive a clean
 /// bounded shutdown.
 ///
-/// Flow on a shutdown signal (ADR-S3 §S3.3):
+/// Flow on a shutdown signal:
 ///   1. The broadcast::Sender fires once.
 ///   2. Every collector task exits and drops its mpsc::Sender clone.
 ///   3. The consumer task drains any in-flight batches, then exits.

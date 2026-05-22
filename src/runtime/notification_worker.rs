@@ -1,11 +1,12 @@
 //! Notification dispatch worker.
 //!
-//! Per ADR-N2: the consumer never calls senders directly. Lifecycle
-//! events surface here as `NotificationDispatch` messages, the
-//! worker drives each target's sender, and the matching
+//! The consumer never calls senders directly. Lifecycle events
+//! surface here as `NotificationDispatch` messages, the worker
+//! drives each target's sender, and the matching
 //! `NotificationAttempt` row is flipped from `Pending` to a terminal
 //! status. If the worker dies mid-dispatch the row stays `Pending` —
-//! that's the audit-trail guarantee.
+//! that's the audit-trail guarantee: every attempt the consumer
+//! enqueued has a row, even ones the worker never finished.
 
 use std::sync::Arc;
 

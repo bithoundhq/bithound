@@ -1,11 +1,11 @@
 //! Central pipeline consumer task.
 //!
-//! Per ADR-S1: one task per sidecar drains the observation channel
+//! One task per sidecar drains the observation channel
 //! and drives the read-model store + incident engine + notification
 //! handoff. `&mut self` on the read-model store and the engine works
 //! without locks because nothing else mutates them.
 //!
-//! Per ADR-N2: lifecycle events surface as Pending attempt rows
+//! Lifecycle events surface as Pending attempt rows
 //! plus a `NotificationDispatch` sent to the worker. The consumer
 //! never calls a sender directly.
 
@@ -200,7 +200,8 @@ fn evaluate_rules(
             heartbeats: read_models,
             signals: read_models,
         };
-        // Per ADR-S2: a panicking rule must not poison the cycle.
+        // A panicking rule must not poison the cycle — the rest of
+        // this batch's rules still get to run.
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rule.evaluate(ctx)));
         match result {
             Ok(Ok(rule_drafts)) => drafts.extend(rule_drafts),
