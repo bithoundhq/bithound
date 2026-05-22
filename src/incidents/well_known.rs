@@ -7,12 +7,13 @@
 //! `config/default_kinds.toml` catalog.
 
 pub const BITCOIN_RPC_UNREACHABLE: &str = "bitcoin.rpc_unreachable";
+pub const BITCOIN_NO_PEERS: &str = "bitcoin.no_peers";
 
 /// All canonical incident-kind names shipped in the built-in catalog.
 ///
 /// The parity test in this module ensures this slice matches the
 /// embedded `config/default_kinds.toml`.
-pub const ALL: &[&str] = &[BITCOIN_RPC_UNREACHABLE];
+pub const ALL: &[&str] = &[BITCOIN_RPC_UNREACHABLE, BITCOIN_NO_PEERS];
 
 #[cfg(test)]
 mod tests {

@@ -10,3 +10,9 @@ name = "bitcoin.rpc_unreachable"
 allowed_subjects = ["BitcoinNode"]
 allows_dimension = false
 min_open_confidence = "High"
+
+[[kinds]]
+name = "bitcoin.no_peers"
+allowed_subjects = ["BitcoinNode"]
+allows_dimension = false
+min_open_confidence = "High"
