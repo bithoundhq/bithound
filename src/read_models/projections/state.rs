@@ -36,7 +36,8 @@ impl StateProjection {
     pub fn for_subject(&self, subject: &EntityRef) -> Vec<Projected<StateObservation>> {
         self.by_key
             .iter()
-            .filter_map(|((s, _), v)| (s == subject).then(|| v.clone()))
+            .filter(|((s, _), _)| s == subject)
+            .map(|((_, _), v)| v.clone())
             .collect()
     }
 }
@@ -107,7 +108,11 @@ mod tests {
         state: StateObservation,
         observed_at: chrono::DateTime<Utc>,
     ) -> Observation {
-        Observation::state(ctx(subject, observed_at), state, Attributes(BTreeMap::new()))
+        Observation::state(
+            ctx(subject, observed_at),
+            state,
+            Attributes(BTreeMap::new()),
+        )
     }
 
     fn btc(s: &str) -> EntityRef {
@@ -130,9 +135,8 @@ mod tests {
     #[test]
     fn default_is_empty() {
         let p = StateProjection::default();
-        let name = StateName(
-            crate::observations::state::well_known::BITCOIN_BLOCKCHAIN.to_string(),
-        );
+        let name =
+            StateName(crate::observations::state::well_known::BITCOIN_BLOCKCHAIN.to_string());
         assert!(p.get_latest(&btc("alice"), &name).is_none());
     }
 
@@ -143,7 +147,9 @@ mod tests {
         p.apply(&obs).unwrap();
         p.apply(&obs).unwrap();
 
-        let latest = p.get_latest(&btc("alice"), &obs.payload_state_name()).unwrap();
+        let latest = p
+            .get_latest(&btc("alice"), &obs.payload_state_name())
+            .unwrap();
         assert_eq!(latest.observation_id, obs.id);
         assert_eq!(latest.observed_at, obs.observed_at);
     }
@@ -156,7 +162,9 @@ mod tests {
         p.apply(&a).unwrap();
         p.apply(&b).unwrap();
 
-        let latest = p.get_latest(&btc("alice"), &a.payload_state_name()).unwrap();
+        let latest = p
+            .get_latest(&btc("alice"), &a.payload_state_name())
+            .unwrap();
         assert_eq!(latest.observation_id, b.id);
         match latest.value {
             StateObservation::BitcoinBlockchain(s) => assert_eq!(s.blocks, 200),
@@ -185,7 +193,8 @@ mod tests {
     #[test]
     fn for_subject_returns_all_state_names_for_that_subject() {
         let mut p = StateProjection::new();
-        p.apply(&state_obs(btc("alice"), blockchain(1), at(0))).unwrap();
+        p.apply(&state_obs(btc("alice"), blockchain(1), at(0)))
+            .unwrap();
         p.apply(&state_obs(
             btc("alice"),
             StateObservation::BitcoinMempool(BitcoinMempoolState {
@@ -198,7 +207,8 @@ mod tests {
             at(1),
         ))
         .unwrap();
-        p.apply(&state_obs(btc("bob"), blockchain(1), at(0))).unwrap();
+        p.apply(&state_obs(btc("bob"), blockchain(1), at(0)))
+            .unwrap();
 
         let alice = p.for_subject(&btc("alice"));
         assert_eq!(alice.len(), 2);

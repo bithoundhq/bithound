@@ -556,11 +556,9 @@ mod tests {
                             return;
                         }
                         let req = String::from_utf8_lossy(&buf[..n]).to_string();
-                        let body_start =
-                            req.find("\r\n\r\n").map(|i| i + 4).unwrap_or(req.len());
-                        let parsed: serde_json::Value =
-                            serde_json::from_str(&req[body_start..])
-                                .unwrap_or(serde_json::Value::Null);
+                        let body_start = req.find("\r\n\r\n").map(|i| i + 4).unwrap_or(req.len());
+                        let parsed: serde_json::Value = serde_json::from_str(&req[body_start..])
+                            .unwrap_or(serde_json::Value::Null);
                         let request_id = parsed
                             .get("id")
                             .and_then(|v| v.as_str())
@@ -618,10 +616,7 @@ mod tests {
             }))
         })
         .await;
-        let err = client(addr, 2_000)
-            .get_blockchain_info()
-            .await
-            .unwrap_err();
+        let err = client(addr, 2_000).get_blockchain_info().await.unwrap_err();
         match err {
             RpcError::IdMismatch { expected, got } => {
                 assert!(expected.starts_with("bithound-"));

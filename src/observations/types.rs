@@ -120,6 +120,7 @@ impl Observation {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn heartbeat(
         ctx: ObservationContext,
         sequence: u64,

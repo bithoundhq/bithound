@@ -34,7 +34,8 @@ impl CapabilityProjection {
     pub fn for_subject(&self, subject: &EntityRef) -> Vec<Projected<CapabilityObservation>> {
         self.by_key
             .iter()
-            .filter_map(|((s, _), v)| (s == subject).then(|| v.clone()))
+            .filter(|((s, _), _)| s == subject)
+            .map(|((_, _), v)| v.clone())
             .collect()
     }
 }
@@ -141,10 +142,7 @@ mod tests {
         p.apply(&a).unwrap();
         p.apply(&b).unwrap();
         let cur = p
-            .current_capability(
-                &btc("alice"),
-                &CapabilityName("bitcoin.zmq.rawtx".into()),
-            )
+            .current_capability(&btc("alice"), &CapabilityName("bitcoin.zmq.rawtx".into()))
             .unwrap();
         assert_eq!(cur.value.status, CapabilityStatus::Unavailable);
         assert_eq!(cur.observation_id, b.id);
@@ -168,10 +166,7 @@ mod tests {
         p.apply(&newer).unwrap();
         p.apply(&older).unwrap();
         let cur = p
-            .current_capability(
-                &btc("alice"),
-                &CapabilityName("bitcoin.zmq.rawtx".into()),
-            )
+            .current_capability(&btc("alice"), &CapabilityName("bitcoin.zmq.rawtx".into()))
             .unwrap();
         assert_eq!(cur.value.status, CapabilityStatus::Unavailable);
     }

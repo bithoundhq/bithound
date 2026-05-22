@@ -14,10 +14,9 @@ use crate::{
     },
     read_models::{
         CapabilityProjection, CapabilityReadModel, HealthProjection, HealthReadModel,
-        HeartbeatProjection, HeartbeatReadModel, IncidentSignalProjection,
-        IncidentSignalReadModel, MetricProjection, MetricReadModel, Projected, Projection,
-        ProjectionError, StateProjection, StateReadModel, DEFAULT_HEARTBEAT_CAPACITY,
-        DEFAULT_METRIC_SERIES_CAPACITY,
+        HeartbeatProjection, HeartbeatReadModel, IncidentSignalProjection, IncidentSignalReadModel,
+        MetricProjection, MetricReadModel, Projected, Projection, ProjectionError, StateProjection,
+        StateReadModel, DEFAULT_HEARTBEAT_CAPACITY, DEFAULT_METRIC_SERIES_CAPACITY,
     },
     shared::types::EntityRef,
 };
@@ -323,23 +322,17 @@ mod tests {
             _ => panic!(),
         }
 
-        let metric = MetricReadModel::latest_metric(
-            &store,
-            &alice,
-            &MetricName("peer_count".into()),
-        )
-        .expect("metric");
+        let metric =
+            MetricReadModel::latest_metric(&store, &alice, &MetricName("peer_count".into()))
+                .expect("metric");
         match metric.value.value {
             MetricValue::Numeric(NumericValue::U64(v)) => assert_eq!(v, 8),
             _ => panic!(),
         }
 
-        let health = HealthReadModel::current_health(
-            &store,
-            &alice,
-            &HealthTargetId("bitcoin.rpc".into()),
-        )
-        .expect("health");
+        let health =
+            HealthReadModel::current_health(&store, &alice, &HealthTargetId("bitcoin.rpc".into()))
+                .expect("health");
         assert_eq!(health.value.status, HealthStatus::Ok);
 
         let cap = CapabilityReadModel::current_capability(
@@ -383,21 +376,15 @@ mod tests {
         );
         assert_eq!(samples.len(), 1);
 
-        let unchanged = MetricReadModel::unchanged_for(
-            &store,
-            &alice,
-            &MetricName("peer_count".into()),
-        )
-        .expect("series populated");
+        let unchanged =
+            MetricReadModel::unchanged_for(&store, &alice, &MetricName("peer_count".into()))
+                .expect("series populated");
         assert_eq!(unchanged.len(), 1);
 
         let caps = CapabilityReadModel::capabilities_for(&store, &alice);
         assert_eq!(caps.len(), 1);
 
-        let hbs = HeartbeatReadModel::heartbeats_since(
-            &store,
-            t0() - ChronoDuration::seconds(1),
-        );
+        let hbs = HeartbeatReadModel::heartbeats_since(&store, t0() - ChronoDuration::seconds(1));
         assert_eq!(hbs.len(), 1);
 
         let active = IncidentSignalReadModel::active_signals_for(&store, &alice);
@@ -453,12 +440,10 @@ mod tests {
 
         // All projections empty.
         assert!(StateReadModel::states_for(&store, &btc("alice")).is_empty());
-        assert!(MetricReadModel::latest_metric(
-            &store,
-            &btc("alice"),
-            &MetricName("x".into())
-        )
-        .is_none());
+        assert!(
+            MetricReadModel::latest_metric(&store, &btc("alice"), &MetricName("x".into()))
+                .is_none()
+        );
         assert!(HealthReadModel::current_health(
             &store,
             &btc("alice"),
@@ -467,9 +452,7 @@ mod tests {
         .is_none());
         assert!(CapabilityReadModel::capabilities_for(&store, &btc("alice")).is_empty());
         assert!(HeartbeatReadModel::latest_heartbeat(&store).is_none());
-        assert!(
-            IncidentSignalReadModel::active_signals_for(&store, &btc("alice")).is_empty()
-        );
+        assert!(IncidentSignalReadModel::active_signals_for(&store, &btc("alice")).is_empty());
     }
 
     #[test]

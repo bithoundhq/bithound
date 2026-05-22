@@ -1,5 +1,8 @@
 //! SQLite backend per ADR-P1.
 
+pub mod incident_repository;
+pub mod observation_store;
+
 use std::path::Path;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};

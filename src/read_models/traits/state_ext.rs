@@ -75,10 +75,7 @@ pub trait StateReadModelExt: StateReadModel {
         ))
     }
 
-    fn lnd_channel_summary(
-        &self,
-        node: &LndNodeId,
-    ) -> Option<Projected<LndChannelSummaryState>> {
+    fn lnd_channel_summary(&self, node: &LndNodeId) -> Option<Projected<LndChannelSummaryState>> {
         unwrap_state(self.latest_state(
             &EntityRef::LndNode(node.clone()),
             &StateName(observations::state::well_known::LND_CHANNEL_SUMMARY.to_string()),
@@ -250,9 +247,7 @@ mod tests {
         let observed_at = fixture_observed_at();
         let store = FakeStore {
             subject: EntityRef::BitcoinNode(node.clone()),
-            name: StateName(
-                observations::state::well_known::BITCOIN_BLOCKCHAIN.to_string(),
-            ),
+            name: StateName(observations::state::well_known::BITCOIN_BLOCKCHAIN.to_string()),
             value: StateObservation::BitcoinBlockchain(inner.clone()),
             observation_id: obs_id.clone(),
             observed_at,
@@ -283,9 +278,7 @@ mod tests {
         let other = BitcoinNodeId("bob".into());
         let store = FakeStore {
             subject: EntityRef::BitcoinNode(node.clone()),
-            name: StateName(
-                observations::state::well_known::BITCOIN_BLOCKCHAIN.to_string(),
-            ),
+            name: StateName(observations::state::well_known::BITCOIN_BLOCKCHAIN.to_string()),
             value: StateObservation::BitcoinBlockchain(BitcoinBlockchainState {
                 chain: "main".into(),
                 blocks: 1,
@@ -311,9 +304,7 @@ mod tests {
         let node = BitcoinNodeId("alice".into());
         let store = FakeStore {
             subject: EntityRef::BitcoinNode(node.clone()),
-            name: StateName(
-                observations::state::well_known::BITCOIN_BLOCKCHAIN.to_string(),
-            ),
+            name: StateName(observations::state::well_known::BITCOIN_BLOCKCHAIN.to_string()),
             value: StateObservation::BitcoinMempool(BitcoinMempoolState {
                 loaded: true,
                 tx_count: 0,

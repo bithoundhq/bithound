@@ -32,7 +32,8 @@ impl HealthProjection {
     pub fn for_subject(&self, subject: &EntityRef) -> Vec<Projected<HealthCheckObservation>> {
         self.by_key
             .iter()
-            .filter_map(|((s, _), v)| (s == subject).then(|| v.clone()))
+            .filter(|((s, _), _)| s == subject)
+            .map(|((_, _), v)| v.clone())
             .collect()
     }
 }
@@ -163,8 +164,10 @@ mod tests {
     #[test]
     fn for_subject_scans_only_that_subject() {
         let mut p = HealthProjection::new();
-        p.apply(&health_obs(btc("alice"), "rpc", HealthStatus::Ok, t0())).unwrap();
-        p.apply(&health_obs(btc("alice"), "zmq", HealthStatus::Ok, t0())).unwrap();
+        p.apply(&health_obs(btc("alice"), "rpc", HealthStatus::Ok, t0()))
+            .unwrap();
+        p.apply(&health_obs(btc("alice"), "zmq", HealthStatus::Ok, t0()))
+            .unwrap();
         p.apply(&health_obs(btc("bob"), "rpc", HealthStatus::Critical, t0()))
             .unwrap();
 

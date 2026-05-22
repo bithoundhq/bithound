@@ -27,13 +27,8 @@ pub struct BitcoinNodeConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum BitcoinAuthConfig {
-    UserPass {
-        user: String,
-        password_env: String,
-    },
-    CookieFile {
-        path: String,
-    },
+    UserPass { user: String, password_env: String },
+    CookieFile { path: String },
 }
 
 /// `[[lnd_nodes]]` — reserved for V0.1+. Defined now so the TOML
