@@ -27,7 +27,9 @@ use crate::config::notifications::{
     TelegramParseModeConfig,
 };
 use crate::config::{Config, LoadedConfig, ResolvedSecrets};
-use crate::diagnostics::rules::bitcoin::{BitcoinNoPeersRule, BitcoinRpcUnreachableRule};
+use crate::diagnostics::rules::bitcoin::{
+    BitcoinNoPeersRule, BitcoinRpcUnreachableRule, BitcoinTipLagOrIbdStalledRule,
+};
 use crate::diagnostics::traits::DiagnosticRule;
 use crate::incidents::kinds::KindRegistry;
 use crate::incidents::repository::IncidentRepository;
@@ -164,6 +166,7 @@ async fn boot_runtime(loaded: LoadedConfig) -> anyhow::Result<()> {
     let rules: Vec<Box<dyn DiagnosticRule>> = vec![
         Box::new(BitcoinRpcUnreachableRule::new()),
         Box::new(BitcoinNoPeersRule::new()),
+        Box::new(BitcoinTipLagOrIbdStalledRule::new()),
     ];
 
     let deps = runtime::RuntimeDeps {

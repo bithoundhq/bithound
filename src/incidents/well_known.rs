@@ -8,12 +8,17 @@
 
 pub const BITCOIN_RPC_UNREACHABLE: &str = "bitcoin.rpc_unreachable";
 pub const BITCOIN_NO_PEERS: &str = "bitcoin.no_peers";
+pub const BITCOIN_TIP_LAG_OR_IBD_STALLED: &str = "bitcoin.tip_lag_or_ibd_stalled";
 
 /// All canonical incident-kind names shipped in the built-in catalog.
 ///
 /// The parity test in this module ensures this slice matches the
 /// embedded `config/default_kinds.toml`.
-pub const ALL: &[&str] = &[BITCOIN_RPC_UNREACHABLE, BITCOIN_NO_PEERS];
+pub const ALL: &[&str] = &[
+    BITCOIN_RPC_UNREACHABLE,
+    BITCOIN_NO_PEERS,
+    BITCOIN_TIP_LAG_OR_IBD_STALLED,
+];
 
 #[cfg(test)]
 mod tests {
