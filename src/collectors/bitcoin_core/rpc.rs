@@ -434,14 +434,22 @@ mod tests {
                     }
                     let req = String::from_utf8_lossy(&buf[..n]).to_string();
                     let body_start = req.find("\r\n\r\n").map(|i| i + 4).unwrap_or(req.len());
-                    let body = &req[body_start..];
-                    let method = serde_json::from_str::<serde_json::Value>(body)
-                        .ok()
-                        .and_then(|v| v.get("method").and_then(|m| m.as_str()).map(str::to_string))
+                    let parsed = serde_json::from_str::<serde_json::Value>(&req[body_start..])
+                        .unwrap_or(serde_json::Value::Null);
+                    let method = parsed
+                        .get("method")
+                        .and_then(|m| m.as_str())
+                        .map(str::to_string)
                         .unwrap_or_default();
+                    let request_id = parsed.get("id").cloned().unwrap_or(serde_json::Value::Null);
                     let idx = count.fetch_add(1, Ordering::SeqCst);
                     match handler(&method, idx) {
-                        Reply::Json(value) => {
+                        Reply::Json(mut value) => {
+                            // Echo the request id into the response envelope so the
+                            // client's id-correlation check passes by default.
+                            if let Some(obj) = value.as_object_mut() {
+                                obj.insert("id".to_string(), request_id);
+                            }
                             let body = serde_json::to_vec(&value).unwrap();
                             let response = format!(
                                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",

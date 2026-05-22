@@ -2,6 +2,8 @@
 //! Core RPCs the V0 collector needs. Hand-rolled rather than depending
 //! on a published RPC crate because the surface is tiny.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::StatusCode;
@@ -19,6 +21,10 @@ pub struct BitcoinRpcClient {
     auth: BitcoinRpcAuth,
     http: reqwest::Client,
     timeout: Duration,
+    /// Monotonic sequence used to give every outgoing RPC a unique JSON-RPC
+    /// id. `Arc<AtomicU64>` so cloned clients share the same counter and
+    /// concurrent calls cannot reuse the same id.
+    rpc_seq: Arc<AtomicU64>,
 }
 
 impl BitcoinRpcClient {
@@ -33,6 +39,7 @@ impl BitcoinRpcClient {
             auth,
             http,
             timeout,
+            rpc_seq: Arc::new(AtomicU64::new(1)),
         }
     }
 
@@ -57,9 +64,10 @@ impl BitcoinRpcClient {
         method: &str,
         params: serde_json::Value,
     ) -> Result<T, RpcError> {
+        let id = format!("bithound-{}", self.rpc_seq.fetch_add(1, Ordering::Relaxed));
         let envelope = RpcRequest {
             jsonrpc: "1.0",
-            id: "bithound",
+            id: &id,
             method,
             params,
         };
@@ -85,6 +93,24 @@ impl BitcoinRpcClient {
 
             let body = response.bytes().await?;
             let envelope: RpcResponse<T> = serde_json::from_slice(&body)?;
+
+            // Verify the response id echoes the request id. A mismatch
+            // means the response came from a different call than the
+            // one we issued — connection-pool confusion, broken proxy,
+            // or hostile peer — and the body cannot be trusted as the
+            // answer to this method.
+            let response_id = envelope.id.as_ref().and_then(|v| v.as_str());
+            if response_id != Some(id.as_str()) {
+                return Err(RpcError::IdMismatch {
+                    expected: id.clone(),
+                    got: envelope
+                        .id
+                        .as_ref()
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "<missing>".into()),
+                });
+            }
+
             if let Some(err) = envelope.error {
                 return Err(RpcError::BitcoindError {
                     code: err.code,
@@ -131,6 +157,8 @@ pub enum RpcError {
     Decode(#[from] serde_json::Error),
     #[error("authentication failed")]
     Auth,
+    #[error("JSON-RPC id mismatch: expected {expected}, got {got}")]
+    IdMismatch { expected: String, got: String },
 }
 
 impl RpcError {
@@ -147,6 +175,7 @@ impl RpcError {
             RpcError::HttpStatus(_) => CollectionErrorKind::ProtocolError,
             RpcError::BitcoindError { .. } => CollectionErrorKind::InvalidResponse,
             RpcError::Decode(_) => CollectionErrorKind::DecodeError,
+            RpcError::IdMismatch { .. } => CollectionErrorKind::ProtocolError,
         }
     }
 }
@@ -163,6 +192,8 @@ struct RpcRequest<'a> {
 struct RpcResponse<T> {
     result: Option<T>,
     error: Option<RpcErrorEnvelope>,
+    #[serde(default)]
+    id: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -245,7 +276,13 @@ mod tests {
     /// a single response. Enough to drive the JSON-RPC client without a
     /// real Bitcoin Core node.
     enum Reply {
+        /// JSON-RPC envelope. The mock overwrites the `id` field with
+        /// the id parsed from the request so the client's id-correlation
+        /// check passes by default.
         Json(serde_json::Value),
+        /// Same as `Json` but the framework leaves the `id` field alone.
+        /// Used by the id-mismatch test.
+        JsonNoEcho(serde_json::Value),
         Status(u16),
         Hang,
     }
@@ -269,13 +306,28 @@ mod tests {
                     }
                     let req = String::from_utf8_lossy(&buf[..n]).to_string();
                     let body_start = req.find("\r\n\r\n").map(|i| i + 4).unwrap_or(req.len());
-                    let body = &req[body_start..];
-                    let method = serde_json::from_str::<serde_json::Value>(body)
-                        .ok()
-                        .and_then(|v| v.get("method").and_then(|m| m.as_str()).map(str::to_string))
+                    let parsed = serde_json::from_str::<serde_json::Value>(&req[body_start..])
+                        .unwrap_or(serde_json::Value::Null);
+                    let method = parsed
+                        .get("method")
+                        .and_then(|m| m.as_str())
+                        .map(str::to_string)
                         .unwrap_or_default();
+                    let request_id = parsed.get("id").cloned().unwrap_or(serde_json::Value::Null);
                     match handler(&method) {
-                        Reply::Json(value) => {
+                        Reply::Json(mut value) => {
+                            if let Some(obj) = value.as_object_mut() {
+                                obj.insert("id".to_string(), request_id);
+                            }
+                            let body = serde_json::to_vec(&value).unwrap();
+                            let response = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                body.len()
+                            );
+                            socket.write_all(response.as_bytes()).await.ok();
+                            socket.write_all(&body).await.ok();
+                        }
+                        Reply::JsonNoEcho(value) => {
                             let body = serde_json::to_vec(&value).unwrap();
                             let response = format!(
                                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -479,6 +531,104 @@ mod tests {
             path: "/nonexistent/path/.cookie".into(),
         };
         assert!(matches!(resolve_auth(&auth), Err(RpcError::Auth)));
+    }
+
+    #[tokio::test]
+    async fn each_call_uses_a_unique_id_and_the_response_id_is_validated() {
+        use std::sync::Mutex;
+        let seen_ids: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen_ids_clone = seen_ids.clone();
+        let addr = {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let seen = seen_ids_clone;
+            tokio::spawn(async move {
+                loop {
+                    let (mut socket, _) = match listener.accept().await {
+                        Ok(p) => p,
+                        Err(_) => return,
+                    };
+                    let seen = seen.clone();
+                    tokio::spawn(async move {
+                        let mut buf = vec![0u8; 8192];
+                        let n = socket.read(&mut buf).await.unwrap_or(0);
+                        if n == 0 {
+                            return;
+                        }
+                        let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                        let body_start =
+                            req.find("\r\n\r\n").map(|i| i + 4).unwrap_or(req.len());
+                        let parsed: serde_json::Value =
+                            serde_json::from_str(&req[body_start..])
+                                .unwrap_or(serde_json::Value::Null);
+                        let request_id = parsed
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string)
+                            .unwrap_or_default();
+                        seen.lock().unwrap().push(request_id.clone());
+
+                        let envelope = serde_json::json!({
+                            "result": {
+                                "chain": "main",
+                                "blocks": 0u64,
+                                "headers": 0u64,
+                                "verificationprogress": 1.0,
+                            },
+                            "error": null,
+                            "id": request_id,
+                        });
+                        let body = serde_json::to_vec(&envelope).unwrap();
+                        let header = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        );
+                        socket.write_all(header.as_bytes()).await.ok();
+                        socket.write_all(&body).await.ok();
+                    });
+                }
+            });
+            addr
+        };
+
+        let c = client(addr, 2_000);
+        c.get_blockchain_info().await.expect("call 1");
+        c.get_blockchain_info().await.expect("call 2");
+        c.get_blockchain_info().await.expect("call 3");
+
+        let ids = seen_ids.lock().unwrap().clone();
+        assert_eq!(ids.len(), 3);
+        assert_eq!(ids[0], "bithound-1");
+        assert_eq!(ids[1], "bithound-2");
+        assert_eq!(ids[2], "bithound-3");
+    }
+
+    #[tokio::test]
+    async fn response_with_wrong_id_maps_to_id_mismatch() {
+        let addr = spawn_mock(|_| {
+            Reply::JsonNoEcho(serde_json::json!({
+                "result": {
+                    "chain": "main",
+                    "blocks": 0u64,
+                    "headers": 0u64,
+                    "verificationprogress": 1.0,
+                },
+                "error": null,
+                "id": "not-our-id",
+            }))
+        })
+        .await;
+        let err = client(addr, 2_000)
+            .get_blockchain_info()
+            .await
+            .unwrap_err();
+        match err {
+            RpcError::IdMismatch { expected, got } => {
+                assert!(expected.starts_with("bithound-"));
+                assert!(got.contains("not-our-id"));
+            }
+            other => panic!("expected IdMismatch, got {:?}", other),
+        }
     }
 
     /// Integration test against a real regtest Bitcoin Core node.
