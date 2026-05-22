@@ -8,6 +8,33 @@ consumer wiring lands and bithound actually boots end-to-end.
 
 ## [Unreleased]
 
+## [0.0.2.0] - 2026-05-22
+
+### Added
+- Storage layer (Phase 3): `ObservationStore` and `IncidentRepository`
+  trait surfaces in `src/storage/traits.rs`, plus the
+  `NotificationAttemptRepository` trait in `src/notifications/repository.rs`.
+- SQLite-backed impls under `src/storage/sqlite/`:
+  `observation_store.rs` (append/stream observations, WAL-friendly),
+  `incident_repository.rs` (open-incident persistence, load_open at
+  boot).
+- Retention background task in `src/storage/retention.rs` —
+  enforces the configured `[storage.retention]` windows on a periodic
+  timer, exits cleanly on shutdown.
+- In-memory test impls of every repository trait under
+  `src/storage/memory/`. These are the impls the Phase 10 runtime
+  integration tests will use; the SQLite impls take over in
+  production.
+- Revised `NotificationAttempt` carrying `lifecycle_kind`,
+  `target_kind` + `target_summary` (never the SecretString itself),
+  `attempt_number`, retry chaining (`parent_attempt_id`,
+  `next_retry_at`), and outcome/external_ref columns — the audit
+  shape the V0 worker will produce.
+
+### Changed
+- `IncidentRepository` interface expanded with the methods the
+  consumer + bootstrap need (`save`, `load_open`).
+
 ## [0.0.1.0] - 2026-05-22
 
 ### Added
