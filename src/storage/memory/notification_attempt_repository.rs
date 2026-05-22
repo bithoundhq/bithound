@@ -108,7 +108,7 @@ mod tests {
     use super::*;
     use crate::incidents::IncidentNotificationEventKind;
     use crate::notifications::targets::telegram::TelegramChatId;
-    use crate::notifications::{
+    use crate::notifications::types::{
         ExternalMessageRef, NotificationRuleId, PermanentError, TargetKind, TransientError,
     };
     use chrono::TimeZone;

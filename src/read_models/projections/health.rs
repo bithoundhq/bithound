@@ -32,7 +32,8 @@ impl HealthProjection {
     pub fn for_subject(&self, subject: &EntityRef) -> Vec<Projected<HealthCheckObservation>> {
         self.by_key
             .iter()
-            .filter_map(|((s, _), v)| (s == subject).then(|| v.clone()))
+            .filter(|((s, _), _)| s == subject)
+            .map(|((_, _), v)| v.clone())
             .collect()
     }
 }

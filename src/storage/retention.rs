@@ -118,7 +118,9 @@ mod tests {
     };
     use crate::observations::*;
     use crate::shared::types::*;
-    use crate::storage::sqlite::{open_pool, SqliteIncidentRepository, SqliteObservationStore};
+    use crate::storage::sqlite::incident_repository::SqliteIncidentRepository;
+    use crate::storage::sqlite::observation_store::SqliteObservationStore;
+    use crate::storage::sqlite::open_pool;
     use crate::storage::traits::ObservationStore;
     use chrono::TimeZone;
 

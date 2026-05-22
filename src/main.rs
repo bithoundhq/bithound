@@ -1,3 +1,9 @@
+// Many types are defined ahead of the runtime that will use them — the
+// runtime wiring (Phase 10+) is what actually drives them. Allow
+// dead_code crate-wide until that lands; CLAUDE.md flags this as
+// expected for the current phase.
+#![allow(dead_code)]
+
 mod collectors;
 mod config;
 mod diagnostics;

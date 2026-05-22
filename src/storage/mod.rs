@@ -9,4 +9,3 @@ pub mod retention;
 pub mod sqlite;
 pub mod traits;
 
-pub use traits::{ObservationStore, StoreError};
