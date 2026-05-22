@@ -269,28 +269,31 @@ async fn process_engine_event(
     }
 }
 
-/// V0 retry policy for incident persistence: 3 attempts on backoff
-/// 100ms / 500ms / 2s. Write-through-to-repo is the invariant, so we
-/// retry, but we don't block the consumer indefinitely. Exhaust =
-/// log + skip.
+/// V0 retry policy for incident persistence: 3 attempts total, with
+/// 100ms and 500ms sleeps between them. Write-through-to-repo is the
+/// invariant, so we retry, but we don't block the consumer
+/// indefinitely. Exhaust = log + skip; the engine's in-memory state
+/// will retry persistence on the next signal that touches this
+/// incident.
 async fn save_incident_with_retry(
     incident_repo: &dyn IncidentRepository,
     incident: &crate::incidents::Incident,
 ) -> Result<(), crate::incidents::repository::RepoError> {
-    const BACKOFFS_MS: [u64; 3] = [100, 500, 2_000];
+    // Two waits between three attempts: try, sleep, try, sleep, try.
+    const RETRY_DELAYS_MS: [u64; 2] = [100, 500];
     let mut last_err = None;
-    for (i, delay_ms) in BACKOFFS_MS.iter().enumerate() {
+    for attempt_index in 0..=RETRY_DELAYS_MS.len() {
         match incident_repo.save(incident).await {
             Ok(()) => return Ok(()),
             Err(e) => {
                 last_err = Some(e);
-                if i + 1 < BACKOFFS_MS.len() {
-                    tokio::time::sleep(Duration::from_millis(*delay_ms)).await;
+                if let Some(&delay) = RETRY_DELAYS_MS.get(attempt_index) {
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
                 }
             }
         }
     }
-    Err(last_err.expect("BACKOFFS_MS is non-empty"))
+    Err(last_err.expect("loop runs at least once"))
 }
 
 async fn dispatch_lifecycle(

@@ -155,7 +155,8 @@ async fn boot_runtime(loaded: LoadedConfig) -> anyhow::Result<()> {
         open_incidents,
     );
 
-    let notification_rules = build_notification_rules(&config.notification_rules, &secrets)?;
+    let notification_rules =
+        build_notification_rules(&config.notification_rules, &config.notifications, &secrets)?;
     let senders = build_senders(&config.notifications, &secrets, &http)?;
 
     let deps = runtime::RuntimeDeps {
@@ -179,15 +180,27 @@ async fn boot_runtime(loaded: LoadedConfig) -> anyhow::Result<()> {
 
 fn build_notification_rules(
     rules: &[NotificationRuleConfig],
+    notifications: &NotificationsConfig,
     secrets: &ResolvedSecrets,
 ) -> anyhow::Result<Vec<NotificationRule>> {
+    // `[notifications.telegram].parse_mode` is sink-wide for V0 —
+    // every Telegram rule inherits it. If the operator omits the
+    // telegram block entirely, default to PlainText (the safest
+    // choice; HTML-escaped output of plain text is well-defined,
+    // the reverse isn't).
+    let telegram_parse_mode = notifications
+        .telegram
+        .as_ref()
+        .map(|t| map_telegram_parse_mode(&t.parse_mode))
+        .unwrap_or(TelegramParseMode::PlainText);
+
     let mut out: Vec<NotificationRule> = Vec::with_capacity(rules.len());
     for cfg in rules {
         let target = match &cfg.target {
             NotificationTargetConfig::Telegram { chat_id } => {
                 NotificationTarget::Telegram(TelegramTarget {
                     chat_id: TelegramChatId(*chat_id),
-                    parse_mode: TelegramParseMode::PlainText,
+                    parse_mode: telegram_parse_mode.clone(),
                 })
             }
             NotificationTargetConfig::Discord {
@@ -252,6 +265,17 @@ fn map_severity(s: &SeverityConfig) -> IncidentSeverity {
     }
 }
 
+/// Map the operator-supplied parse mode to the runtime enum. MarkdownV2
+/// isn't a runtime variant in V0; it falls back to Html so the operator's
+/// intent ("formatted, not plain") is preserved.
+fn map_telegram_parse_mode(c: &TelegramParseModeConfig) -> TelegramParseMode {
+    match c {
+        TelegramParseModeConfig::Plain => TelegramParseMode::PlainText,
+        TelegramParseModeConfig::Html => TelegramParseMode::Html,
+        TelegramParseModeConfig::MarkdownV2 => TelegramParseMode::Html,
+    }
+}
+
 fn build_senders(
     notifications: &NotificationsConfig,
     secrets: &ResolvedSecrets,
@@ -259,6 +283,10 @@ fn build_senders(
 ) -> anyhow::Result<NotifierSenders> {
     let webhook = WebhookSender::new(http.clone());
 
+    // `parse_mode` from the sink config is consumed by
+    // `build_notification_rules` (it lives on the per-rule
+    // TelegramTarget, not on TelegramSender). The sender only needs
+    // the bot token.
     let telegram = match &notifications.telegram {
         Some(cfg) => {
             let token = secrets
@@ -270,28 +298,16 @@ fn build_senders(
                     )
                 })?
                 .clone();
-            // Parse-mode is per-target on TelegramTarget; the sink
-            // config carries a default but TelegramSender itself
-            // doesn't store one — leave that wiring to the per-rule
-            // target in `build_notification_rules`.
-            let _ = match cfg.parse_mode {
-                TelegramParseModeConfig::Plain => TelegramParseMode::PlainText,
-                TelegramParseModeConfig::Html => TelegramParseMode::Html,
-                // MarkdownV2 isn't a runtime variant yet; fall back to Html
-                // (most operators want some kind of formatting).
-                TelegramParseModeConfig::MarkdownV2 => TelegramParseMode::Html,
-            };
             Some(TelegramSender::new(token, http.clone()))
         }
         None => None,
     };
 
-    // Discord and Webhook don't have a sink-wide secret yet (every
-    // Discord rule carries its own webhook URL). Constructing senders
-    // is unconditional.
+    // Discord and Webhook don't have a sink-wide secret yet — each
+    // rule carries its own URL. The senders are constructed
+    // unconditionally so any rule can route through them.
     let discord = Some(DiscordSender::new(http.clone()));
 
-    let _ = secrets; // keep the borrow alive for the early-return paths above
     Ok(NotifierSenders {
         webhook,
         telegram,
