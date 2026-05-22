@@ -6,11 +6,71 @@ All notable changes to this project are recorded here. Format follows
 
 The supervisor + consumer wiring landed in 0.0.3.0 — bithound now
 boots, supervises its collectors, drives the engine + notification
-worker, and shuts down cleanly on SIGINT/SIGTERM. The remaining
-gap before a "real" 0.1.0.0 is the first diagnostic rules (Phase
-11).
+worker, and shuts down cleanly on SIGINT/SIGTERM. The first three V0
+diagnostic rules (Phase 11) ship in 0.0.4.0; the next milestone toward
+a "real" 0.1.0.0 is end-to-end regtest verification + operator docs.
 
 ## [Unreleased]
+
+## [0.0.4.0] - 2026-05-22
+
+### Added
+- First V0 diagnostic rules (Phase 11) in `src/diagnostics/rules/bitcoin/`:
+  - `BitcoinRpcUnreachableRule` (`bitcoin.rpc_unreachable`) — Active
+    when all four Bitcoin RPC health targets (`getblockchaininfo`,
+    `getmempoolinfo`, `getnetworkinfo`, `getpeerinfo`) report
+    `HealthStatus::Critical` for ≥ 60 seconds; Cleared on any
+    target's return to `Ok`. Confidence High, severity Critical.
+  - `BitcoinNoPeersRule` (`bitcoin.no_peers`) — Active when
+    `connections_out == 0` AND `networkactive == true` for ≥ 60
+    seconds; Cleared when an outbound peer reappears. Stays silent
+    when the operator has disabled networking. Confidence High,
+    severity Critical. Tightens catalog entry A3 (<8 peers) to the
+    unambiguous zero case.
+  - `BitcoinTipLagOrIbdStalledRule` (`bitcoin.tip_lag_or_ibd_stalled`)
+    — Active when either A1 (IBD true, `headers - blocks < 1000`,
+    `verification_progress > 0.999`, peer_count ≥ 8) or A2
+    (`headers - blocks ≥ 1000` AND `verification_progress` flat
+    over a 5-minute window) holds across two consecutive ticks;
+    Cleared when neither holds for two consecutive ticks.
+    Confidence High, severity Critical.
+- `IncidentKind::from_well_known(&'static str) -> IncidentKind`
+  helper so rules can reference kinds via the constants in
+  `src/incidents/well_known.rs` rather than re-typing string literals.
+- `SignalName::for_incident_kind(&IncidentKind)` helper centralizes the
+  rule-to-signal-name mapping (`"{kind}.signal"`) so the suffix can't
+  drift across the codebase. Existing test fixtures in
+  `runtime/consumer.rs`, `storage/sqlite/observation_store.rs`, and
+  `observations/types.rs` updated to use it.
+- `DiagnosticContext` gains a `monotonic_now: std::time::Instant`
+  field alongside `now: DateTime<Utc>`. Rules use the monotonic clock
+  for all debounce timing, so a backwards wall-clock jump (NTP
+  correction, VM suspend/resume) cannot stall an open incident.
+- `config/default_kinds.toml` now ships entries for the three V0 kinds
+  (`bitcoin.rpc_unreachable`, `bitcoin.no_peers`,
+  `bitcoin.tip_lag_or_ibd_stalled`) with `min_open_confidence = "High"`
+  and `allowed_subjects = ["BitcoinNode"]`. A parity test in
+  `well_known` fails the build on drift between the constants and the
+  embedded catalog.
+- `StateReadModelExt` is now re-exported from `crate::read_models` so
+  rule code can call `ctx.state.bitcoin_blockchain(...)` etc. without
+  reaching into the trait submodule.
+- `BitcoinCoreRpcCollector` exports `HEALTH_TARGETS` (the canonical
+  ordered list of its four RPC health-check target names). Rules
+  reference this slice so a renamed target in the collector can't
+  silently drift from its consumers.
+- `main.rs` wires all three rules into `RuntimeDeps::rules` at boot.
+
+### Hardening (review-driven)
+- All three rules use poison-safe `Mutex` recovery: a panic inside one
+  `evaluate` call no longer cascades through the consumer task. The
+  next tick rebuilds the counters from observed state.
+- Per-subject state maps prune idle entries after one hour with no
+  open incident, so long-running sidecars whose subject set churns
+  don't grow the map without bound.
+- `debug_assert!(debounce_ticks >= 1)` in
+  `BitcoinTipLagOrIbdStalledRule::with_settings` rejects the zero-tick
+  configuration that would collapse the rule to fire-on-first-tick.
 
 ## [0.0.3.0] - 2026-05-22
 
