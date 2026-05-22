@@ -53,7 +53,14 @@ impl DiscordSender {
 
         match status_code {
             200..=299 => {
-                let external_ref = serde_json::from_slice::<DiscordMessageResponse>(&body_bytes)
+                // The sender always passes ?wait=true so Discord must
+                // return the created message JSON on success. A 2xx
+                // with an unparseable body is suspicious (captive
+                // portal, misconfigured proxy, partial CDN outage),
+                // not a successful delivery — return Transient::Unknown
+                // so the notifier retries instead of silently writing
+                // Delivered to the audit trail.
+                match serde_json::from_slice::<DiscordMessageResponse>(&body_bytes)
                     .ok()
                     .and_then(|m| {
                         let mid: u64 = m.id.parse().ok()?;
@@ -62,8 +69,21 @@ impl DiscordSender {
                             channel_id: DiscordChannelId(cid),
                             message_id: mid,
                         })
-                    });
-                DeliveryOutcome::Delivered { external_ref }
+                    }) {
+                    Some(external_ref) => DeliveryOutcome::Delivered {
+                        external_ref: Some(external_ref),
+                    },
+                    None => DeliveryOutcome::Transient {
+                        error: TransientError::Unknown {
+                            detail: format!(
+                                "HTTP {} but body is not a Discord message envelope (got {} bytes)",
+                                status_code,
+                                body_bytes.len()
+                            ),
+                        },
+                        retry_after: None,
+                    },
+                }
             }
             401 | 403 => DeliveryOutcome::Permanent {
                 error: PermanentError::AuthFailure,
@@ -74,9 +94,12 @@ impl DiscordSender {
             429 => {
                 // Discord publishes retry_after as a float (seconds) in
                 // the JSON body, and also sets the Retry-After header.
+                // Reject NaN/Inf/negative to defend against a hostile
+                // upstream sending bogus values that would otherwise
+                // overflow i64 or schedule a retry in the past.
                 let retry_after = serde_json::from_slice::<DiscordRateLimitBody>(&body_bytes)
                     .ok()
-                    .map(|b| ChronoDuration::milliseconds((b.retry_after * 1000.0).round() as i64));
+                    .and_then(|b| sane_retry_after_seconds_f64(b.retry_after));
                 DeliveryOutcome::Transient {
                     error: TransientError::RateLimited,
                     retry_after,
@@ -115,6 +138,21 @@ struct DiscordMessageResponse {
 #[derive(Debug, Deserialize)]
 struct DiscordRateLimitBody {
     retry_after: f64,
+}
+
+/// Reject NaN, infinity, and negative values, then convert to a
+/// finite chrono::Duration. Caps the upper bound at one hour because
+/// any `retry_after` from Discord beyond that is a sign of a malformed
+/// or hostile response, and longer scheduling is the notifier's
+/// retry-backoff job.
+fn sane_retry_after_seconds_f64(secs: f64) -> Option<ChronoDuration> {
+    if !secs.is_finite() || secs < 0.0 {
+        return None;
+    }
+    const MAX_SECS: f64 = 3_600.0;
+    let bounded = secs.min(MAX_SECS);
+    let ms = (bounded * 1000.0).round() as i64;
+    Some(ChronoDuration::milliseconds(ms))
 }
 
 #[cfg(test)]
@@ -395,5 +433,52 @@ mod tests {
         assert_eq!(body["allowed_mentions"]["parse"], json!([]));
         assert_eq!(body["allowed_mentions"]["roles"], json!([]));
         assert_eq!(body["allowed_mentions"]["users"], json!([]));
+    }
+
+    /// A 2xx response that isn't a parseable Discord message envelope
+    /// (captive portal HTML, empty body, CDN error page) must NOT be
+    /// reported as a successful delivery. The engine relies on
+    /// Delivered meaning "the message reached Discord and we have the
+    /// message_id"; downgrade to Transient::Unknown so the caller can
+    /// retry instead of writing a misleading success to the audit log.
+    #[tokio::test]
+    async fn http_200_with_non_json_body_returns_transient_unknown() {
+        let (addr, _cap) = spawn_mock(|| Reply::Status(200, "<html>captive portal</html>")).await;
+        let r = sender().send(&target(addr), &payload()).await;
+        match r.outcome {
+            DeliveryOutcome::Transient {
+                error: TransientError::Unknown { detail },
+                ..
+            } => {
+                assert!(
+                    detail.contains("HTTP 200"),
+                    "detail should name the suspicious status: {}",
+                    detail
+                );
+            }
+            other => panic!(
+                "expected Transient::Unknown for unparseable 200 body, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn retry_after_clamp_rejects_nan_inf_and_negative() {
+        assert_eq!(sane_retry_after_seconds_f64(f64::NAN), None);
+        assert_eq!(sane_retry_after_seconds_f64(f64::INFINITY), None);
+        assert_eq!(sane_retry_after_seconds_f64(f64::NEG_INFINITY), None);
+        assert_eq!(sane_retry_after_seconds_f64(-0.001), None);
+        assert_eq!(
+            sane_retry_after_seconds_f64(0.5),
+            Some(ChronoDuration::milliseconds(500))
+        );
+        assert_eq!(
+            sane_retry_after_seconds_f64(1.0),
+            Some(ChronoDuration::seconds(1))
+        );
+        // Hostile upstream sends a year — clamped to one hour.
+        let huge = sane_retry_after_seconds_f64(31_536_000.0).unwrap();
+        assert_eq!(huge, ChronoDuration::seconds(3_600));
     }
 }
