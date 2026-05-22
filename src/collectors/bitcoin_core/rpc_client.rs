@@ -64,40 +64,42 @@ impl BitcoinRpcClient {
             params,
         };
 
-        let mut builder = self.http.post(&self.url).json(&envelope);
+        // Single outer timeout covers the entire RPC: connect + headers +
+        // body read + decode. The per-call budget is `self.timeout`; a
+        // separate timeout on each I/O step would double the worst-case
+        // wall time and break the collector's deterministic upper bound
+        // of N × per_rpc_timeout.
+        let inner = async {
+            let mut builder = self.http.post(&self.url).json(&envelope);
+            let (user, pass) = resolve_auth(&self.auth)?;
+            builder = builder.basic_auth(user, Some(pass));
 
-        let (user, pass) = resolve_auth(&self.auth)?;
-        builder = builder.basic_auth(user, Some(pass));
+            let response = builder.send().await?;
+            let status = response.status();
+            if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+                return Err(RpcError::Auth);
+            }
+            if !status.is_success() {
+                return Err(RpcError::HttpStatus(status.as_u16()));
+            }
 
-        let fut = builder.send();
-        let response = tokio::time::timeout(self.timeout, fut)
+            let body = response.bytes().await?;
+            let envelope: RpcResponse<T> = serde_json::from_slice(&body)?;
+            if let Some(err) = envelope.error {
+                return Err(RpcError::BitcoindError {
+                    code: err.code,
+                    message: err.message,
+                });
+            }
+            envelope.result.ok_or(RpcError::BitcoindError {
+                code: 0,
+                message: "missing result in JSON-RPC envelope".into(),
+            })
+        };
+
+        tokio::time::timeout(self.timeout, inner)
             .await
-            .map_err(|_: Elapsed| RpcError::Timeout)??;
-
-        let status = response.status();
-        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-            return Err(RpcError::Auth);
-        }
-        if !status.is_success() {
-            return Err(RpcError::HttpStatus(status.as_u16()));
-        }
-
-        let body_fut = response.bytes();
-        let body = tokio::time::timeout(self.timeout, body_fut)
-            .await
-            .map_err(|_: Elapsed| RpcError::Timeout)??;
-
-        let envelope: RpcResponse<T> = serde_json::from_slice(&body)?;
-        if let Some(err) = envelope.error {
-            return Err(RpcError::BitcoindError {
-                code: err.code,
-                message: err.message,
-            });
-        }
-        envelope.result.ok_or(RpcError::BitcoindError {
-            code: 0,
-            message: "missing result in JSON-RPC envelope".into(),
-        })
+            .map_err(|_: Elapsed| RpcError::Timeout)?
     }
 }
 

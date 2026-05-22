@@ -21,8 +21,9 @@ use crate::collectors::traits::PollingCollector;
 use crate::collectors::{CollectionContext, CollectionError, CollectorDescriptor, CollectorTarget};
 use crate::observations::{
     Attributes, BitcoinBlockchainState, BitcoinMempoolState, BitcoinNetworkState,
-    BitcoinPeerSummaryState, HealthStatus, Observation, ObservationBatch, ObservationContext,
-    ObservationOrigin, ObservationSource, ProbeResult, ProbeWindow, StateObservation,
+    BitcoinPeerSummaryState, HealthCheckObservation, HealthStatus, HealthTargetId, Observation,
+    ObservationBatch, ObservationContext, ObservationOrigin, ObservationSource, ProbeResult,
+    ProbeWindow, StateObservation,
 };
 use crate::shared::types::{BitcoinNodeId, EntityRef, ObservationBatchId, SidecarId};
 
@@ -130,6 +131,7 @@ impl PollingCollector for BitcoinCoreRpcCollector {
         let observed_at = Utc::now();
         match self.client.get_blockchain_info().await {
             Ok(info) => {
+                let latency_ms = duration_ms(observed_at, Utc::now());
                 partials.push(Observation::state(
                     self.obs_context(&ctx.sidecar_id, observed_at),
                     StateObservation::BitcoinBlockchain(blockchain_state(info)),
@@ -139,7 +141,7 @@ impl PollingCollector for BitcoinCoreRpcCollector {
                     self.obs_context(&ctx.sidecar_id, observed_at),
                     HEALTH_BLOCKCHAIN,
                     HealthStatus::Ok,
-                    None,
+                    latency_ms,
                     None,
                     None,
                     empty_attrs(),
@@ -161,6 +163,7 @@ impl PollingCollector for BitcoinCoreRpcCollector {
         let observed_at = Utc::now();
         match self.client.get_mempool_info().await {
             Ok(info) => {
+                let latency_ms = duration_ms(observed_at, Utc::now());
                 partials.push(Observation::state(
                     self.obs_context(&ctx.sidecar_id, observed_at),
                     StateObservation::BitcoinMempool(mempool_state(info)),
@@ -170,7 +173,7 @@ impl PollingCollector for BitcoinCoreRpcCollector {
                     self.obs_context(&ctx.sidecar_id, observed_at),
                     HEALTH_MEMPOOL,
                     HealthStatus::Ok,
-                    None,
+                    latency_ms,
                     None,
                     None,
                     empty_attrs(),
@@ -185,6 +188,7 @@ impl PollingCollector for BitcoinCoreRpcCollector {
         let observed_at = Utc::now();
         match self.client.get_network_info().await {
             Ok(info) => {
+                let latency_ms = duration_ms(observed_at, Utc::now());
                 partials.push(Observation::state(
                     self.obs_context(&ctx.sidecar_id, observed_at),
                     StateObservation::BitcoinNetwork(network_state(info)),
@@ -194,7 +198,7 @@ impl PollingCollector for BitcoinCoreRpcCollector {
                     self.obs_context(&ctx.sidecar_id, observed_at),
                     HEALTH_NETWORK,
                     HealthStatus::Ok,
-                    None,
+                    latency_ms,
                     None,
                     None,
                     empty_attrs(),
@@ -209,6 +213,7 @@ impl PollingCollector for BitcoinCoreRpcCollector {
         let observed_at = Utc::now();
         match self.client.get_peer_info().await {
             Ok(peers) => {
+                let latency_ms = duration_ms(observed_at, Utc::now());
                 partials.push(Observation::state(
                     self.obs_context(&ctx.sidecar_id, observed_at),
                     StateObservation::BitcoinPeerSummary(peer_summary_state(&peers)),
@@ -218,7 +223,7 @@ impl PollingCollector for BitcoinCoreRpcCollector {
                     self.obs_context(&ctx.sidecar_id, observed_at),
                     HEALTH_PEERS,
                     HealthStatus::Ok,
-                    None,
+                    latency_ms,
                     None,
                     None,
                     empty_attrs(),
@@ -229,9 +234,7 @@ impl PollingCollector for BitcoinCoreRpcCollector {
             }
         }
 
-        let completed_at = Utc::now();
-        let window = ProbeWindow::new(started_at, completed_at)
-            .expect("started_at precedes completed_at within a single poll");
+        let window = safe_probe_window(started_at, Utc::now());
         self.build_batch(
             ctx.sidecar_id.clone(),
             window,
@@ -254,31 +257,23 @@ impl BitcoinCoreRpcCollector {
     ) -> ObservationBatch {
         let kind = err.collection_error_kind();
         let message = err.to_string();
-        let health_obs = match Observation::health(
-            self.obs_context(&ctx.sidecar_id, observed_at),
-            target,
-            health_status_for(&err),
-            None,
-            Some(message.clone()),
-            None,
-            empty_attrs(),
-        ) {
-            obs => obs,
-        };
-        let health_payload = match health_obs.payload.clone() {
-            crate::observations::ObservationPayload::Health(h) => h,
-            _ => unreachable!("Observation::health builds a Health payload"),
-        };
-
         let completed_at = Utc::now();
-        let window = ProbeWindow::new(started_at, completed_at)
-            .unwrap_or_else(|_| ProbeWindow::new(completed_at, completed_at).unwrap());
+        let latency_ms = duration_ms(observed_at, completed_at);
 
+        let health = HealthCheckObservation {
+            target: HealthTargetId(target.to_string()),
+            status: HealthStatus::Critical,
+            latency_ms,
+            message: Some(message.clone()),
+            error: None,
+        };
+
+        let window = safe_probe_window(started_at, completed_at);
         self.build_batch(
             ctx.sidecar_id.clone(),
             window,
             ProbeResult::Failed {
-                health: health_payload,
+                health,
                 partial_observations: partials,
                 error: CollectionError { kind, message },
             },
@@ -290,6 +285,29 @@ const HEALTH_BLOCKCHAIN: &str = "bitcoin.rpc.getblockchaininfo";
 const HEALTH_MEMPOOL: &str = "bitcoin.rpc.getmempoolinfo";
 const HEALTH_NETWORK: &str = "bitcoin.rpc.getnetworkinfo";
 const HEALTH_PEERS: &str = "bitcoin.rpc.getpeerinfo";
+
+/// Construct a `ProbeWindow` defensively. A backwards clock jump
+/// between `started_at` and `completed_at` collapses to a zero-width
+/// window pinned at the later instant instead of panicking. Both the
+/// success and failure paths use this so an NTP correction mid-poll
+/// can't crash the poll task on one path while silently producing
+/// stretched windows on the other.
+fn safe_probe_window(
+    started_at: chrono::DateTime<Utc>,
+    completed_at: chrono::DateTime<Utc>,
+) -> ProbeWindow {
+    ProbeWindow::new(started_at, completed_at)
+        .unwrap_or_else(|_| ProbeWindow::new(completed_at, completed_at).unwrap())
+}
+
+fn duration_ms(from: chrono::DateTime<Utc>, to: chrono::DateTime<Utc>) -> Option<u64> {
+    let ms = (to - from).num_milliseconds();
+    if ms < 0 {
+        None
+    } else {
+        Some(ms as u64)
+    }
+}
 
 fn empty_attrs() -> Attributes {
     Attributes(std::collections::BTreeMap::new())
@@ -341,15 +359,27 @@ fn peer_summary_state(peers: &GetPeerInfoResponse) -> BitcoinPeerSummaryState {
     let peer_count = peers.len() as u64;
     let inbound_count = peers.iter().filter(|p| p.inbound).count() as u64;
     let outbound_count = peer_count - inbound_count;
-    let block_relay_only_count = peers
-        .iter()
-        .filter(|p| p.connection_type.as_deref() == Some("block-relay-only"))
-        .count() as u64;
+    // Bitcoin Core ≥ 0.21 exposes `connection_type`; older versions omit
+    // it. If no peer in the response carries the field, treat the count
+    // as unknown rather than emitting Some(0), which would silently look
+    // like "no block-relay-only peers" to downstream rules.
+    let connection_type_supported =
+        !peers.is_empty() && peers.iter().any(|p| p.connection_type.is_some());
+    let block_relay_only_count = if connection_type_supported {
+        Some(
+            peers
+                .iter()
+                .filter(|p| p.connection_type.as_deref() == Some("block-relay-only"))
+                .count() as u64,
+        )
+    } else {
+        None
+    };
     BitcoinPeerSummaryState {
         peer_count,
         inbound_count: Some(inbound_count),
         outbound_count: Some(outbound_count),
-        block_relay_only_count: Some(block_relay_only_count),
+        block_relay_only_count,
     }
 }
 
