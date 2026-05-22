@@ -1,0 +1,98 @@
+# Example bithound configuration. Copy to /etc/bithound/bithound.toml
+# or pass with --config and edit to match your environment. Secrets
+# never live in this file — every secret is referenced by env-var
+# name (the field suffix ends in _env).
+
+[sidecar]
+id_file = "/var/lib/bithound/sidecar_id"
+log_level = "info"
+
+[storage]
+db_path = "/var/lib/bithound/bithound.db"
+
+[storage.retention]
+observations_max_age_days = 30
+incidents_max_age_days    = 365
+suppressions_grace_days   = 90
+vacuum_interval_hours     = 24
+
+[runtime]
+channel_capacity = 1024
+shutdown_deadline_seconds = 30
+
+[incidents]
+kinds_config_path = "/etc/bithound/custom_kinds.toml"
+
+# ---- monitored entities ----
+[[bitcoin_nodes]]
+id = "btc-alice"
+rpc_url = "http://127.0.0.1:8332"
+zmq_endpoint = "tcp://127.0.0.1:28332"
+
+[bitcoin_nodes.auth]
+type = "user_pass"
+user = "bithound"
+password_env = "BITHOUND_BITCOIN_ALICE_PASSWORD"
+
+# Alternative cookie-based auth (no env var needed):
+# [bitcoin_nodes.auth]
+# type = "cookie_file"
+# path = "/var/lib/bitcoind/.cookie"
+
+# ---- collectors ----
+[[collectors]]
+id = "btc-alice-rpc"
+target = { type = "bitcoin_node", id = "btc-alice" }
+integration = { type = "bitcoin_core_rpc", interval_seconds = 10 }
+instance_label = "alice"
+description = "Bitcoin Core RPC polling for alice"
+
+# ---- notifications ----
+[notifications.telegram]
+bot_token_env = "BITHOUND_TELEGRAM_BOT_TOKEN"
+parse_mode = "html"
+
+[notifications.discord]
+# Sink-wide defaults (none yet). The actual webhook URL lives on
+# each [[notification_rules]] entry that targets discord.
+
+[notifications.webhook]
+# Same idea as [notifications.discord].
+
+# `id` is an operator-picked slug. Keep it short, lowercase-hyphenated,
+# and unique within this file — it shows up in audit logs and incident
+# attribution exactly as written.
+
+[[notification_rules]]
+id = "critical-to-telegram"
+name = "Critical incidents → Telegram"
+enabled = true
+min_severity = "critical"
+event_kinds = []   # empty = all kinds
+
+[notification_rules.target]
+type = "telegram"
+chat_id = -1001234567890
+
+[[notification_rules]]
+id = "warnings-to-discord-ops"
+name = "Warnings → Discord #ops"
+enabled = true
+min_severity = "warning"
+event_kinds = []
+
+[notification_rules.target]
+type = "discord"
+webhook_env = "BITHOUND_OPS_DISCORD_WEBHOOK"
+# thread_id = 1234567890123456789  # optional — omit to post in the channel itself
+
+[[notification_rules]]
+id = "critical-to-pagerduty"
+name = "Critical incidents → PagerDuty"
+enabled = true
+min_severity = "critical"
+event_kinds = []
+
+[notification_rules.target]
+type = "webhook"
+url_env = "BITHOUND_OPS_PAGERDUTY_WEBHOOK"
