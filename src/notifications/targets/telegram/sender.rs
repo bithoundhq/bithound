@@ -29,7 +29,11 @@ impl TelegramSender {
         self
     }
 
-    pub async fn send(&self, target: &TelegramTarget, payload: &TelegramPayload) -> DeliveryReceipt {
+    pub async fn send(
+        &self,
+        target: &TelegramTarget,
+        payload: &TelegramPayload,
+    ) -> DeliveryReceipt {
         let started_at = Utc::now();
         let outcome = self.do_send(target, payload).await;
         DeliveryReceipt {
@@ -148,7 +152,9 @@ impl TelegramSender {
                 },
             },
             Some(code) if (500..600).contains(&code) => DeliveryOutcome::Transient {
-                error: TransientError::Upstream5xx { status: code as u16 },
+                error: TransientError::Upstream5xx {
+                    status: code as u16,
+                },
                 retry_after: None,
             },
             _ => DeliveryOutcome::Transient {
@@ -319,7 +325,11 @@ mod tests {
         let r = sender(addr).send(&target(), &payload()).await;
         match r.outcome {
             DeliveryOutcome::Delivered {
-                external_ref: Some(ExternalMessageRef::Telegram { chat_id, message_id }),
+                external_ref:
+                    Some(ExternalMessageRef::Telegram {
+                        chat_id,
+                        message_id,
+                    }),
             } => {
                 assert_eq!(chat_id.0, -1001234567890);
                 assert_eq!(message_id, 4242);
@@ -392,7 +402,9 @@ mod tests {
         let r = sender(addr).send(&target(), &payload()).await;
         assert!(matches!(
             r.outcome,
-            DeliveryOutcome::Permanent { error: PermanentError::AuthFailure }
+            DeliveryOutcome::Permanent {
+                error: PermanentError::AuthFailure
+            }
         ));
     }
 
@@ -408,7 +420,9 @@ mod tests {
         let r = sender(addr).send(&target(), &payload()).await;
         assert!(matches!(
             r.outcome,
-            DeliveryOutcome::Permanent { error: PermanentError::DestinationGone }
+            DeliveryOutcome::Permanent {
+                error: PermanentError::DestinationGone
+            }
         ));
     }
 
@@ -452,7 +466,10 @@ mod tests {
         let r = sender(addr).send(&target(), &payload()).await;
         assert!(matches!(
             r.outcome,
-            DeliveryOutcome::Transient { error: TransientError::Network, .. }
+            DeliveryOutcome::Transient {
+                error: TransientError::Network,
+                ..
+            }
         ));
     }
 }

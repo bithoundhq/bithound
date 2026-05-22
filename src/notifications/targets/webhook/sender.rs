@@ -129,7 +129,7 @@ mod tests {
 
     enum Reply {
         Status(u16, Vec<(&'static str, String)>, &'static str), // status, headers, body
-        Network,                                                 // close socket without responding
+        Network,                                                // close socket without responding
     }
 
     async fn spawn_mock<F>(handler: F) -> (SocketAddr, Arc<Mutex<Vec<Captured>>>)
@@ -220,7 +220,10 @@ mod tests {
     async fn http_200_returns_delivered_with_no_external_ref() {
         let (addr, _cap) = spawn_mock(|| Reply::Status(200, vec![], "{}")).await;
         let r = sender().send(&target_for(addr, vec![]), &payload()).await;
-        assert!(matches!(r.outcome, DeliveryOutcome::Delivered { external_ref: None }));
+        assert!(matches!(
+            r.outcome,
+            DeliveryOutcome::Delivered { external_ref: None }
+        ));
     }
 
     #[tokio::test]
@@ -249,7 +252,9 @@ mod tests {
         let r = sender().send(&target_for(addr, vec![]), &payload()).await;
         assert!(matches!(
             r.outcome,
-            DeliveryOutcome::Permanent { error: PermanentError::AuthFailure }
+            DeliveryOutcome::Permanent {
+                error: PermanentError::AuthFailure
+            }
         ));
     }
 
@@ -259,7 +264,9 @@ mod tests {
         let r = sender().send(&target_for(addr, vec![]), &payload()).await;
         assert!(matches!(
             r.outcome,
-            DeliveryOutcome::Permanent { error: PermanentError::AuthFailure }
+            DeliveryOutcome::Permanent {
+                error: PermanentError::AuthFailure
+            }
         ));
     }
 
@@ -269,7 +276,9 @@ mod tests {
         let r = sender().send(&target_for(addr, vec![]), &payload()).await;
         assert!(matches!(
             r.outcome,
-            DeliveryOutcome::Permanent { error: PermanentError::DestinationGone }
+            DeliveryOutcome::Permanent {
+                error: PermanentError::DestinationGone
+            }
         ));
     }
 
@@ -287,10 +296,8 @@ mod tests {
 
     #[tokio::test]
     async fn http_429_returns_rate_limited_with_retry_after() {
-        let (addr, _cap) = spawn_mock(|| {
-            Reply::Status(429, vec![("Retry-After", "12".into())], "")
-        })
-        .await;
+        let (addr, _cap) =
+            spawn_mock(|| Reply::Status(429, vec![("Retry-After", "12".into())], "")).await;
         let r = sender().send(&target_for(addr, vec![]), &payload()).await;
         match r.outcome {
             DeliveryOutcome::Transient {
@@ -322,7 +329,10 @@ mod tests {
         let r = sender().send(&target_for(addr, vec![]), &payload()).await;
         assert!(matches!(
             r.outcome,
-            DeliveryOutcome::Transient { error: TransientError::Network, .. }
+            DeliveryOutcome::Transient {
+                error: TransientError::Network,
+                ..
+            }
         ));
     }
 
