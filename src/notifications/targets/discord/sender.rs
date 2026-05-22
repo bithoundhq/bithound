@@ -27,18 +27,23 @@ impl DiscordSender {
     }
 
     async fn do_send(&self, target: &DiscordTarget, payload: &DiscordPayload) -> DeliveryOutcome {
-        // Append ?wait=true so Discord returns the created message JSON
-        // (with id + channel_id) instead of a 204 with no body. If a
-        // thread is targeted, also append &thread_id=…
-        let mut url = target.webhook_url.expose_secret().to_string();
-        let sep = if url.contains('?') { '&' } else { '?' };
-        url.push(sep);
-        url.push_str("wait=true");
+        // wait=true asks Discord to return the created message JSON
+        // (with id + channel_id) instead of a 204 with no body, which
+        // we need to populate ExternalMessageRef. thread_id targets a
+        // specific thread when the operator configured one.
+        let mut query: Vec<(&str, String)> = vec![("wait", "true".into())];
         if let Some(thread_id) = target.thread_id {
-            url.push_str(&format!("&thread_id={}", thread_id.0));
+            query.push(("thread_id", thread_id.0.to_string()));
         }
 
-        let response = match self.http.post(&url).json(payload).send().await {
+        let response = match self
+            .http
+            .post(target.webhook_url.expose_secret())
+            .query(&query)
+            .json(payload)
+            .send()
+            .await
+        {
             Ok(r) => r,
             Err(_) => {
                 return DeliveryOutcome::Transient {
