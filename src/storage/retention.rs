@@ -24,11 +24,7 @@ pub struct RetentionConfig {
 }
 
 /// Run the retention loop until `shutdown` fires.
-pub async fn run(
-    pool: SqlitePool,
-    config: RetentionConfig,
-    mut shutdown: broadcast::Receiver<()>,
-) {
+pub async fn run(pool: SqlitePool, config: RetentionConfig, mut shutdown: broadcast::Receiver<()>) {
     let mut ticker = tokio::time::interval(config.vacuum_interval);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
     // First tick fires immediately; we want to wait one interval before the
@@ -64,24 +60,22 @@ pub async fn sweep(pool: &SqlitePool, config: &RetentionConfig) {
     }
     if let Some(age) = config.incidents_max_age {
         let cutoff = now_nanos - duration_nanos(age);
-        if let Err(e) = sqlx::query(
-            "DELETE FROM incidents WHERE resolved_at IS NOT NULL AND resolved_at < ?",
-        )
-        .bind(cutoff)
-        .execute(pool)
-        .await
+        if let Err(e) =
+            sqlx::query("DELETE FROM incidents WHERE resolved_at IS NOT NULL AND resolved_at < ?")
+                .bind(cutoff)
+                .execute(pool)
+                .await
         {
             tracing::warn!(error = %e, "retention: incidents sweep failed");
         }
     }
     if let Some(grace) = config.suppressions_grace {
         let cutoff = now_nanos - duration_nanos(grace);
-        if let Err(e) = sqlx::query(
-            "DELETE FROM suppression_rules WHERE until IS NOT NULL AND until < ?",
-        )
-        .bind(cutoff)
-        .execute(pool)
-        .await
+        if let Err(e) =
+            sqlx::query("DELETE FROM suppression_rules WHERE until IS NOT NULL AND until < ?")
+                .bind(cutoff)
+                .execute(pool)
+                .await
         {
             tracing::warn!(error = %e, "retention: suppression_rules sweep failed");
         }
@@ -124,9 +118,7 @@ mod tests {
     };
     use crate::observations::*;
     use crate::shared::types::*;
-    use crate::storage::sqlite::{
-        open_pool, SqliteIncidentRepository, SqliteObservationStore,
-    };
+    use crate::storage::sqlite::{open_pool, SqliteIncidentRepository, SqliteObservationStore};
     use crate::storage::traits::ObservationStore;
     use chrono::TimeZone;
 
@@ -188,7 +180,10 @@ mod tests {
         let now = Utc::now();
         let old = now - chrono::Duration::hours(10);
         let recent = now - chrono::Duration::minutes(1);
-        store.append_many(&[obs_at(old), obs_at(recent)]).await.unwrap();
+        store
+            .append_many(&[obs_at(old), obs_at(recent)])
+            .await
+            .unwrap();
 
         let cfg = RetentionConfig {
             observations_max_age: Some(Duration::from_secs(3600)),
@@ -199,11 +194,10 @@ mod tests {
         };
         sweep(&pool, &cfg).await;
 
-        let remaining: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM observations")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM observations")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(remaining, 1, "old observation pruned, recent kept");
     }
 
@@ -251,11 +245,10 @@ mod tests {
         };
         sweep(&pool, &cfg).await;
 
-        let remaining: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM observations")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM observations")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(remaining, 1, "None disables sweep");
     }
 

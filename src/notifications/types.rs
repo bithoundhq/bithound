@@ -128,7 +128,10 @@ impl TargetKind {
             ),
             NotificationTarget::Discord(t) => (
                 TargetKind::Discord,
-                format!("discord:webhook=host={}", host_of_secret_url(&t.webhook_url)),
+                format!(
+                    "discord:webhook=host={}",
+                    host_of_secret_url(&t.webhook_url)
+                ),
             ),
             NotificationTarget::Webhook(t) => (
                 TargetKind::Webhook,

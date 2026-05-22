@@ -299,7 +299,9 @@ fn validate_cross_refs(config: &Config) -> Result<(), ConfigError> {
 
     for collector in &config.collectors {
         let (target_id, set) = match &collector.target {
-            collectors::CollectorTargetConfig::BitcoinNode { id } => (id.as_str(), &mut bitcoin_ids),
+            collectors::CollectorTargetConfig::BitcoinNode { id } => {
+                (id.as_str(), &mut bitcoin_ids)
+            }
             collectors::CollectorTargetConfig::LndNode { id } => (id.as_str(), &mut lnd_ids),
             collectors::CollectorTargetConfig::Host { id } => (id.as_str(), &mut host_ids),
         };
@@ -466,8 +468,7 @@ mod tests {
     /// part of that change.
     #[test]
     fn deserializes_example_toml() {
-        let body =
-            std::fs::read_to_string("examples/bithound.example.toml").expect("example.toml");
+        let body = std::fs::read_to_string("examples/bithound.example.toml").expect("example.toml");
         let cfg = Config::from_toml_str(&body).expect("parse example");
 
         // Spot-check that every top-level section actually came in.
@@ -719,11 +720,7 @@ password = "hunter2"
         let err = Config::load_with_env(&cli_for(&path), &env)
             .await
             .unwrap_err();
-        assert!(
-            matches!(err, ConfigError::InlineSecret(_)),
-            "got {:?}",
-            err
-        );
+        assert!(matches!(err, ConfigError::InlineSecret(_)), "got {:?}", err);
     }
 
     #[tokio::test]

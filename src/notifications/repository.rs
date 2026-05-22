@@ -6,9 +6,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
-use crate::notifications::types::{
-    DeliveryReceipt, NotificationAttempt, NotificationAttemptId,
-};
+use crate::notifications::types::{DeliveryReceipt, NotificationAttempt, NotificationAttemptId};
 use crate::shared::types::IncidentId;
 
 #[async_trait]

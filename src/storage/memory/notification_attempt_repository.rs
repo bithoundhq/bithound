@@ -43,9 +43,9 @@ impl NotificationAttemptRepository for MemoryNotificationAttemptRepository {
         next_retry_at: Option<DateTime<Utc>>,
     ) -> Result<(), RepoError> {
         let mut guard = self.inner.lock().await;
-        let attempt = guard.get_mut(id).ok_or_else(|| RepoError::NotFound {
-            id: id.clone(),
-        })?;
+        let attempt = guard
+            .get_mut(id)
+            .ok_or_else(|| RepoError::NotFound { id: id.clone() })?;
         attempt.status = status_for_outcome(&receipt.outcome, next_retry_at.is_some());
         attempt.outcome = Some(receipt.outcome.clone());
         attempt.external_ref = match &receipt.outcome {
@@ -92,10 +92,7 @@ impl NotificationAttemptRepository for MemoryNotificationAttemptRepository {
 /// Terminal status follows the outcome, except a Transient with retries
 /// remaining stays FailedTransient (V0.1+), and a Transient without
 /// remaining retries is FailedPermanent (V0 always hits this branch).
-fn status_for_outcome(
-    outcome: &DeliveryOutcome,
-    will_retry: bool,
-) -> NotificationDeliveryStatus {
+fn status_for_outcome(outcome: &DeliveryOutcome, will_retry: bool) -> NotificationDeliveryStatus {
     match outcome {
         DeliveryOutcome::Delivered { .. } => NotificationDeliveryStatus::Succeeded,
         DeliveryOutcome::Transient { .. } if will_retry => {
@@ -110,10 +107,10 @@ fn status_for_outcome(
 mod tests {
     use super::*;
     use crate::incidents::IncidentNotificationEventKind;
+    use crate::notifications::targets::telegram::TelegramChatId;
     use crate::notifications::{
         ExternalMessageRef, NotificationRuleId, PermanentError, TargetKind, TransientError,
     };
-    use crate::notifications::targets::telegram::TelegramChatId;
     use chrono::TimeZone;
 
     fn pending(
@@ -201,7 +198,9 @@ mod tests {
         repo.insert_pending(&pending(id.clone(), incident, at))
             .await
             .unwrap();
-        repo.complete(&id, transient_receipt(at), None).await.unwrap();
+        repo.complete(&id, transient_receipt(at), None)
+            .await
+            .unwrap();
 
         let listed = repo.list_retryable(at, 10).await.unwrap();
         assert!(listed.is_empty(), "no rows in FailedTransient under V0");
@@ -245,10 +244,15 @@ mod tests {
         repo.insert_pending(&pending(id.clone(), incident.clone(), at))
             .await
             .unwrap();
-        repo.complete(&id, permanent_receipt(at), None).await.unwrap();
+        repo.complete(&id, permanent_receipt(at), None)
+            .await
+            .unwrap();
 
         let listed = repo.list_for_incident(&incident).await.unwrap();
-        assert_eq!(listed[0].status, NotificationDeliveryStatus::FailedPermanent);
+        assert_eq!(
+            listed[0].status,
+            NotificationDeliveryStatus::FailedPermanent
+        );
         assert!(listed[0].external_ref.is_none());
     }
 }

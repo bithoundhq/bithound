@@ -1,7 +1,10 @@
 use super::{TelegramNotificationConfig, TelegramPayload};
 use crate::notifications::types::NotificationMessage;
 
-pub fn render(message: &NotificationMessage, config: &TelegramNotificationConfig) -> TelegramPayload {
+pub fn render(
+    message: &NotificationMessage,
+    config: &TelegramNotificationConfig,
+) -> TelegramPayload {
     TelegramPayload {
         text: format_body(message),
         parse_mode: config.parse_mode.clone(),

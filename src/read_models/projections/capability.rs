@@ -141,10 +141,7 @@ mod tests {
         p.apply(&a).unwrap();
         p.apply(&b).unwrap();
         let cur = p
-            .current_capability(
-                &btc("alice"),
-                &CapabilityName("bitcoin.zmq.rawtx".into()),
-            )
+            .current_capability(&btc("alice"), &CapabilityName("bitcoin.zmq.rawtx".into()))
             .unwrap();
         assert_eq!(cur.value.status, CapabilityStatus::Unavailable);
         assert_eq!(cur.observation_id, b.id);
@@ -168,10 +165,7 @@ mod tests {
         p.apply(&newer).unwrap();
         p.apply(&older).unwrap();
         let cur = p
-            .current_capability(
-                &btc("alice"),
-                &CapabilityName("bitcoin.zmq.rawtx".into()),
-            )
+            .current_capability(&btc("alice"), &CapabilityName("bitcoin.zmq.rawtx".into()))
             .unwrap();
         assert_eq!(cur.value.status, CapabilityStatus::Unavailable);
     }

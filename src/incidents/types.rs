@@ -32,10 +32,9 @@ pub struct IncidentKind(pub String);
 
 /// Structured primary key for an incident.
 ///
-/// Per ADR-L1 §§1–2, the engine computes this from
-/// `(draft.subject, draft.kind, draft.dimension)` on receipt and uses it
-/// as the lookup key for open incidents. `as_key` returns a stable string
-/// form for storage indexing.
+/// The engine computes this from`(draft.subject, draft.kind, draft.dimension)`
+/// on receipt and uses it as the lookup key for open incidents.
+/// `as_key` returns a stable string form for storage indexing.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct IncidentFingerprint {
     pub subject: EntityRef,
