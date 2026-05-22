@@ -325,10 +325,20 @@ impl BitcoinCoreRpcCollector {
     }
 }
 
-const HEALTH_BLOCKCHAIN: &str = "bitcoin.rpc.getblockchaininfo";
-const HEALTH_MEMPOOL: &str = "bitcoin.rpc.getmempoolinfo";
-const HEALTH_NETWORK: &str = "bitcoin.rpc.getnetworkinfo";
-const HEALTH_PEERS: &str = "bitcoin.rpc.getpeerinfo";
+pub const HEALTH_BLOCKCHAIN: &str = "bitcoin.rpc.getblockchaininfo";
+pub const HEALTH_MEMPOOL: &str = "bitcoin.rpc.getmempoolinfo";
+pub const HEALTH_NETWORK: &str = "bitcoin.rpc.getnetworkinfo";
+pub const HEALTH_PEERS: &str = "bitcoin.rpc.getpeerinfo";
+
+/// The four RPC health-target names emitted by [`BitcoinCoreRpcCollector`],
+/// in canonical order. Rules and tests reference this slice so a renamed
+/// target in the collector can't drift silently from its consumers.
+pub const HEALTH_TARGETS: &[&str] = &[
+    HEALTH_BLOCKCHAIN,
+    HEALTH_MEMPOOL,
+    HEALTH_NETWORK,
+    HEALTH_PEERS,
+];
 
 fn empty_attrs() -> Attributes {
     Attributes(std::collections::BTreeMap::new())

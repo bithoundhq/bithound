@@ -27,6 +27,8 @@ use crate::config::notifications::{
     TelegramParseModeConfig,
 };
 use crate::config::{Config, LoadedConfig, ResolvedSecrets};
+use crate::diagnostics::rules::bitcoin::BitcoinRpcUnreachableRule;
+use crate::diagnostics::traits::DiagnosticRule;
 use crate::incidents::kinds::KindRegistry;
 use crate::incidents::repository::IncidentRepository;
 use crate::incidents::{IncidentKind, IncidentSeverity};
@@ -159,11 +161,13 @@ async fn boot_runtime(loaded: LoadedConfig) -> anyhow::Result<()> {
         build_notification_rules(&config.notification_rules, &config.notifications, &secrets)?;
     let senders = build_senders(&config.notifications, &secrets, &http)?;
 
+    let rules: Vec<Box<dyn DiagnosticRule>> = vec![Box::new(BitcoinRpcUnreachableRule::new())];
+
     let deps = runtime::RuntimeDeps {
         sidecar_id,
         polling_collectors: polling,
         subscription_collectors: subscription,
-        rules: vec![], // Phase 11 wires concrete diagnostic rules.
+        rules,
         read_models,
         engine,
         notification_rules,

@@ -30,6 +30,17 @@ pub struct Incident {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct IncidentKind(pub String);
 
+impl IncidentKind {
+    /// Lift a canonical name from [`crate::incidents::well_known`] into
+    /// a typed `IncidentKind`. Rules use this to reference the kind
+    /// they emit signals for without re-typing the string literal —
+    /// drift between the constant and `default_kinds.toml` is caught
+    /// by the parity test in `well_known`.
+    pub fn from_well_known(name: &'static str) -> Self {
+        IncidentKind(name.to_string())
+    }
+}
+
 /// Structured primary key for an incident.
 ///
 /// The engine computes this from`(draft.subject, draft.kind, draft.dimension)`

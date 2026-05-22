@@ -1,0 +1,8 @@
+//! Diagnostic rules for Bitcoin Core nodes.
+
+pub mod rpc_unreachable;
+
+#[cfg(test)]
+pub(crate) mod test_support;
+
+pub use rpc_unreachable::BitcoinRpcUnreachableRule;

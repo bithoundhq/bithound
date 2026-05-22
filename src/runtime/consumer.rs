@@ -105,6 +105,7 @@ async fn process_batch(
     attempts_repo: &dyn NotificationAttemptRepository,
 ) {
     let now = Utc::now();
+    let monotonic_now = std::time::Instant::now();
     let collector_id = batch.collector.id.0.clone();
 
     let observations = observations_from_batch(&batch);
@@ -134,7 +135,14 @@ async fn process_batch(
     }
 
     // ----- Evaluate every rule against this batch's subject ----------
-    let drafts = evaluate_rules(rules, read_models, &subject, now, &collector_id);
+    let drafts = evaluate_rules(
+        rules,
+        read_models,
+        &subject,
+        now,
+        monotonic_now,
+        &collector_id,
+    );
 
     // ----- Hand each draft to the engine, process emitted events ----
     for draft in drafts {
@@ -186,12 +194,14 @@ fn evaluate_rules(
     read_models: &ReadModelStore,
     subject: &EntityRef,
     now: DateTime<Utc>,
+    monotonic_now: std::time::Instant,
     collector_id: &str,
 ) -> Vec<IncidentSignalDraft> {
     let mut drafts: Vec<IncidentSignalDraft> = Vec::new();
     for rule in rules {
         let ctx = DiagnosticContext {
             now,
+            monotonic_now,
             subject,
             state: read_models,
             metrics: read_models,
@@ -584,11 +594,12 @@ mod tests {
             "always-tip-lag"
         }
         fn evaluate(&self, ctx: DiagnosticContext<'_>) -> anyhow::Result<Vec<IncidentSignalDraft>> {
+            let kind = crate::incidents::IncidentKind("bitcoin.tip_lag".into());
             Ok(vec![IncidentSignalDraft {
-                kind: crate::incidents::IncidentKind("bitcoin.tip_lag".into()),
+                signal: SignalName::for_incident_kind(&kind),
+                kind,
                 subject: ctx.subject.clone(),
                 dimension: None,
-                signal: SignalName("bitcoin.tip_lag".into()),
                 severity: SignalSeverity::Warning,
                 status: SignalStatus::Active,
                 confidence: Confidence::High,
