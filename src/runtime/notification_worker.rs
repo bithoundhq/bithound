@@ -179,10 +179,9 @@ mod tests {
         IncidentStatus,
     };
     use crate::notifications::types::{
-        NotificationAttempt, NotificationDeliveryStatus, NotificationRuleId,
-        TargetKind,
+        NotificationAttempt, NotificationDeliveryStatus, NotificationRuleId, TargetKind,
     };
-    use crate::shared::types::{BitcoinNodeId, EntityRef, IncidentId, SidecarId};
+    use crate::shared::types::{BitcoinNodeId, EntityRef, IncidentId};
     use crate::storage::memory::notification_attempt_repository::MemoryNotificationAttemptRepository;
 
     fn senders_stdout_only() -> NotifierSenders {
@@ -273,7 +272,8 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
 
         let handle = tokio::spawn({
-            let attempts_repo = Arc::clone(&attempts_repo) as Arc<dyn NotificationAttemptRepository>;
+            let attempts_repo =
+                Arc::clone(&attempts_repo) as Arc<dyn NotificationAttemptRepository>;
             async move {
                 run(rx, attempts_repo, senders_stdout_only(), shutdown_rx).await;
             }
@@ -317,7 +317,8 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
 
         let handle = tokio::spawn({
-            let attempts_repo = Arc::clone(&attempts_repo) as Arc<dyn NotificationAttemptRepository>;
+            let attempts_repo =
+                Arc::clone(&attempts_repo) as Arc<dyn NotificationAttemptRepository>;
             async move {
                 run(rx, attempts_repo, senders_stdout_only(), shutdown_rx).await;
             }
@@ -349,7 +350,8 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
 
         let handle = tokio::spawn({
-            let attempts_repo = Arc::clone(&attempts_repo) as Arc<dyn NotificationAttemptRepository>;
+            let attempts_repo =
+                Arc::clone(&attempts_repo) as Arc<dyn NotificationAttemptRepository>;
             async move {
                 run(rx, attempts_repo, senders_stdout_only(), shutdown_rx).await;
             }

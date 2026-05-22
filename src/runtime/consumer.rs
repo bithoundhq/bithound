@@ -201,9 +201,7 @@ fn evaluate_rules(
             signals: read_models,
         };
         // Per ADR-S2: a panicking rule must not poison the cycle.
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            rule.evaluate(ctx)
-        }));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rule.evaluate(ctx)));
         match result {
             Ok(Ok(rule_drafts)) => drafts.extend(rule_drafts),
             Ok(Err(e)) => {
@@ -254,14 +252,7 @@ async fn process_engine_event(
             }
         }
         IncidentEvent::Lifecycle(lifecycle) => {
-            dispatch_lifecycle(
-                lifecycle,
-                notification_rules,
-                notif_tx,
-                attempts_repo,
-                now,
-            )
-            .await;
+            dispatch_lifecycle(lifecycle, notification_rules, notif_tx, attempts_repo, now).await;
         }
         IncidentEvent::DraftBelowConfidenceFloor {
             kind,
@@ -588,10 +579,7 @@ mod tests {
         fn id(&self) -> &'static str {
             "always-tip-lag"
         }
-        fn evaluate(
-            &self,
-            ctx: DiagnosticContext<'_>,
-        ) -> anyhow::Result<Vec<IncidentSignalDraft>> {
+        fn evaluate(&self, ctx: DiagnosticContext<'_>) -> anyhow::Result<Vec<IncidentSignalDraft>> {
             Ok(vec![IncidentSignalDraft {
                 kind: crate::incidents::IncidentKind("bitcoin.tip_lag".into()),
                 subject: ctx.subject.clone(),
@@ -656,10 +644,7 @@ mod tests {
             .expect("dispatch should arrive")
             .expect("dispatch is Some");
 
-        assert!(matches!(
-            dispatch.event,
-            IncidentLifecycleEvent::Opened(_)
-        ));
+        assert!(matches!(dispatch.event, IncidentLifecycleEvent::Opened(_)));
 
         // One Pending attempt row inserted.
         let pending = attempts_repo

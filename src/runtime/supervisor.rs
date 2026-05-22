@@ -212,9 +212,7 @@ async fn polling_inner_loop(
         .integration
         .interval()
         .unwrap_or(chrono::Duration::seconds(10));
-    let interval = interval_chrono
-        .to_std()
-        .unwrap_or(Duration::from_secs(10));
+    let interval = interval_chrono.to_std().unwrap_or(Duration::from_secs(10));
 
     let mut ticker = tokio::time::interval(interval);
     // Burn the immediate first tick so we don't double-fire at boot
@@ -497,7 +495,10 @@ mod tests {
         // respawn. Advance ~11.5s and confirm at least two runs.
         tokio::time::advance(Duration::from_millis(500)).await;
         tokio::task::yield_now().await;
-        assert!(runs.load(Ordering::SeqCst) >= 1, "first run should have happened");
+        assert!(
+            runs.load(Ordering::SeqCst) >= 1,
+            "first run should have happened"
+        );
 
         tokio::time::advance(Duration::from_secs(11)).await;
         tokio::task::yield_now().await;

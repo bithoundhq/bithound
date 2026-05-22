@@ -30,7 +30,9 @@ pub enum BuildError {
     #[error("collector {id:?} targets unknown id {target:?}")]
     TargetNotFound { id: String, target: String },
 
-    #[error("collector {id:?} mixes target kind {target_kind} with integration kind {integration_kind}")]
+    #[error(
+        "collector {id:?} mixes target kind {target_kind} with integration kind {integration_kind}"
+    )]
     WrongTargetKind {
         id: String,
         target_kind: &'static str,
@@ -75,12 +77,14 @@ pub fn build_polling_collectors(
                         });
                     }
                 };
-                let connection = registry.bitcoin_nodes.get(node_id).cloned().ok_or_else(|| {
-                    BuildError::TargetNotFound {
+                let connection = registry
+                    .bitcoin_nodes
+                    .get(node_id)
+                    .cloned()
+                    .ok_or_else(|| BuildError::TargetNotFound {
                         id: cfg.id.clone(),
                         target: node_id.0.clone(),
-                    }
-                })?;
+                    })?;
 
                 let descriptor = CollectorDescriptor {
                     id: CollectorId(cfg.id.clone()),
@@ -161,10 +165,7 @@ pub fn node_registry_from_config(
 
     for node in &config.bitcoin_nodes {
         let rpc_auth = match &node.auth {
-            BitcoinAuthConfig::UserPass {
-                user,
-                password_env,
-            } => {
+            BitcoinAuthConfig::UserPass { user, password_env } => {
                 let pass = secrets
                     .get(password_env)
                     .ok_or_else(|| BuildError::SecretNotResolved(password_env.clone()))?
@@ -174,7 +175,9 @@ pub fn node_registry_from_config(
                     pass,
                 }
             }
-            BitcoinAuthConfig::CookieFile { path } => BitcoinRpcAuth::CookieFile { path: path.clone() },
+            BitcoinAuthConfig::CookieFile { path } => {
+                BitcoinRpcAuth::CookieFile { path: path.clone() }
+            }
         };
 
         bitcoin_nodes.insert(
@@ -265,7 +268,9 @@ mod tests {
         let cfg = descriptor_config(
             "alice-rpc",
             "alice",
-            IntegrationConfig::BitcoinCoreRpc { interval_seconds: 10 },
+            IntegrationConfig::BitcoinCoreRpc {
+                interval_seconds: 10,
+            },
         );
         let registry = registry_with("alice");
         let collectors = build_polling_collectors(&[cfg], &registry, &http_client())
@@ -283,7 +288,9 @@ mod tests {
         let cfg = descriptor_config(
             "ghost-rpc",
             "nonexistent-node",
-            IntegrationConfig::BitcoinCoreRpc { interval_seconds: 10 },
+            IntegrationConfig::BitcoinCoreRpc {
+                interval_seconds: 10,
+            },
         );
         let registry = registry_with("alice");
         let err = build_polling_collectors(&[cfg], &registry, &http_client())
@@ -328,7 +335,9 @@ mod tests {
             descriptor_config(
                 "alice-rpc",
                 "alice",
-                IntegrationConfig::BitcoinCoreRpc { interval_seconds: 5 },
+                IntegrationConfig::BitcoinCoreRpc {
+                    interval_seconds: 5,
+                },
             ),
             descriptor_config("alice-zmq", "alice", IntegrationConfig::BitcoinCoreZmq),
         ];
@@ -347,7 +356,9 @@ mod tests {
         let cfgs = vec![descriptor_config(
             "alice-rpc",
             "alice",
-            IntegrationConfig::BitcoinCoreRpc { interval_seconds: 5 },
+            IntegrationConfig::BitcoinCoreRpc {
+                interval_seconds: 5,
+            },
         )];
         let registry = registry_with("alice");
         let subs = build_subscription_collectors(&cfgs, &registry, &http_client())
