@@ -116,17 +116,32 @@ impl TelegramSender {
         };
 
         if envelope.ok {
-            let message_id = envelope.result.as_ref().and_then(|r| r.message_id);
+            // ok:true without result.message_id is a contract violation
+            // from Telegram (it documents result as always present on
+            // success). Treat it as Transient::Unknown rather than
+            // silently writing Delivered with no external_ref — the
+            // engine needs the message_id for future edit/delete flows
+            // and can't distinguish "delivered without an id" from
+            // "looked successful but actually wasn't" otherwise.
+            let Some(message_id) = envelope.result.as_ref().and_then(|r| r.message_id) else {
+                return DeliveryOutcome::Transient {
+                    error: TransientError::Unknown {
+                        detail: "ok:true but no result.message_id".into(),
+                    },
+                    retry_after: None,
+                };
+            };
             let chat_id_returned = envelope
                 .result
                 .as_ref()
                 .and_then(|r| r.chat.as_ref())
                 .and_then(|c| c.id);
-            let external_ref = message_id.map(|mid| ExternalMessageRef::Telegram {
-                chat_id: TelegramChatId(chat_id_returned.unwrap_or(target.chat_id.0)),
-                message_id: mid,
-            });
-            return DeliveryOutcome::Delivered { external_ref };
+            return DeliveryOutcome::Delivered {
+                external_ref: Some(ExternalMessageRef::Telegram {
+                    chat_id: TelegramChatId(chat_id_returned.unwrap_or(target.chat_id.0)),
+                    message_id,
+                }),
+            };
         }
 
         let detail = envelope.description.clone().unwrap_or_default();
@@ -141,6 +156,15 @@ impl TelegramSender {
                 retry_after,
             },
             Some(401) => DeliveryOutcome::Permanent {
+                error: PermanentError::AuthFailure,
+            },
+            // Telegram returns 403 for two very different conditions: a
+            // bad/revoked bot token (auth failure — keep retrying after
+            // an operator rotation) and a chat the bot can no longer
+            // reach (truly gone). Disambiguate by description: tokens
+            // come back as "Unauthorized", blocked/kicked chats use
+            // "blocked", "kicked", or "chat not found".
+            Some(403) if looks_like_auth_failure(&detail) => DeliveryOutcome::Permanent {
                 error: PermanentError::AuthFailure,
             },
             Some(403) => DeliveryOutcome::Permanent {
@@ -163,6 +187,11 @@ impl TelegramSender {
             },
         }
     }
+}
+
+fn looks_like_auth_failure(description: &str) -> bool {
+    let lower = description.to_ascii_lowercase();
+    lower.contains("unauthorized") || lower.contains("invalid token")
 }
 
 #[derive(Debug, Deserialize)]
@@ -469,6 +498,75 @@ mod tests {
             DeliveryOutcome::Transient {
                 error: TransientError::Network,
                 ..
+            }
+        ));
+    }
+
+    /// Telegram's contract says `ok: true` always includes `result`.
+    /// If a buggy/MITM'd response says ok:true but omits result, we
+    /// can't return Delivered { external_ref: None } — that would lie
+    /// to the engine, which depends on Delivered carrying a
+    /// message_id for future edit/resolve flows. Downgrade to
+    /// Transient::Unknown so the caller retries.
+    #[tokio::test]
+    async fn ok_true_without_result_returns_transient_unknown() {
+        let (addr, _cap) = spawn_mock(|| Reply::Json(200, json!({ "ok": true }))).await;
+        let r = sender(addr).send(&target(), &payload()).await;
+        match r.outcome {
+            DeliveryOutcome::Transient {
+                error: TransientError::Unknown { detail },
+                ..
+            } => assert!(detail.contains("message_id")),
+            other => panic!("expected Transient::Unknown, got {:?}", other),
+        }
+    }
+
+    /// Telegram returns error_code: 403 for two distinct conditions —
+    /// "Unauthorized" (bad/revoked bot token, recoverable by rotating
+    /// credentials) and "bot was blocked by the user" / kicked from
+    /// the chat (truly gone). Inspect the description so an operator
+    /// rotating a leaked token doesn't see every chat misclassified
+    /// as DestinationGone.
+    #[tokio::test]
+    async fn error_code_403_with_unauthorized_description_is_auth_failure() {
+        let (addr, _cap) = spawn_mock(|| {
+            Reply::Json(
+                200,
+                json!({
+                    "ok": false,
+                    "error_code": 403,
+                    "description": "Forbidden: Unauthorized"
+                }),
+            )
+        })
+        .await;
+        let r = sender(addr).send(&target(), &payload()).await;
+        assert!(matches!(
+            r.outcome,
+            DeliveryOutcome::Permanent {
+                error: PermanentError::AuthFailure
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn error_code_403_with_blocked_description_stays_destination_gone() {
+        let (addr, _cap) = spawn_mock(|| {
+            Reply::Json(
+                200,
+                json!({
+                    "ok": false,
+                    "error_code": 403,
+                    "description": "Forbidden: bot was blocked by the user"
+                }),
+            )
+        })
+        .await;
+        let r = sender(addr).send(&target(), &payload()).await;
+        assert!(matches!(
+            r.outcome,
+            DeliveryOutcome::Permanent {
+                error: PermanentError::DestinationGone
             }
         ));
     }
