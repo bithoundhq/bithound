@@ -25,6 +25,19 @@ pub struct IncidentSignalObservation {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SignalName(pub String);
 
+impl SignalName {
+    /// Canonical signal name derived from an [`IncidentKind`]: the kind's
+    /// dotted name with a `.signal` suffix.
+    ///
+    /// Centralizing the format here keeps the rule-to-signal-name mapping
+    /// from drifting across the codebase. Tests and rules construct
+    /// signal names via this helper rather than reformatting the suffix
+    /// by hand.
+    pub fn for_incident_kind(kind: &crate::incidents::IncidentKind) -> Self {
+        SignalName(format!("{}.signal", kind.0))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SignalSeverity {
     Info,

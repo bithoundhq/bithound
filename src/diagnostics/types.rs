@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use chrono::{DateTime, Utc};
 
 use crate::{
@@ -15,9 +17,21 @@ use crate::{
 /// rules emitting `SignalStatus::Cleared` can check the
 /// `IncidentSignalReadModel` for the currently-active state — rules
 /// must not clear signals they never raised.
+///
+/// Two clocks live on the context for different jobs:
+///
+/// * `now: DateTime<Utc>` is the wall-clock moment the consumer started
+///   this batch. Rules and the engine stamp it onto produced
+///   observations so storage and notifications carry meaningful
+///   timestamps.
+/// * `monotonic_now: Instant` is the corresponding monotonic moment.
+///   Rules use this to drive any time-bounded hysteresis (debounce
+///   windows, "condition held for N seconds") because it is immune to
+///   NTP corrections, VM suspend/resume, and other wall-clock jumps.
 #[derive(Debug)]
 pub struct DiagnosticContext<'a> {
     pub now: DateTime<Utc>,
+    pub monotonic_now: Instant,
     pub subject: &'a EntityRef,
 
     pub state: &'a dyn StateReadModel,

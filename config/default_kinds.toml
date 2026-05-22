@@ -1,5 +1,24 @@
 # Built-in incident kinds, embedded in the binary via `include_str!` from
 # `src/incidents/kinds.rs`. The user catalog (loaded separately) may add new
 # kinds but may not override entries listed here.
+#
+# Names listed here must stay in sync with `src/incidents/well_known.rs::ALL`.
+# A parity test in the `well_known` module fails the build on drift.
 
-kinds = []
+[[kinds]]
+name = "bitcoin.rpc_unreachable"
+allowed_subjects = ["BitcoinNode"]
+allows_dimension = false
+min_open_confidence = "High"
+
+[[kinds]]
+name = "bitcoin.no_peers"
+allowed_subjects = ["BitcoinNode"]
+allows_dimension = false
+min_open_confidence = "High"
+
+[[kinds]]
+name = "bitcoin.tip_lag_or_ibd_stalled"
+allowed_subjects = ["BitcoinNode"]
+allows_dimension = false
+min_open_confidence = "High"

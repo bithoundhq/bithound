@@ -318,18 +318,21 @@ mod tests {
                 None,
                 attrs(),
             ),
-            Observation::incident_signal(
-                ctx(at),
-                IncidentSignalObservation {
-                    signal: SignalName("bitcoin.no_peers".into()),
-                    incident_kind: IncidentKind("bitcoin.no_peers".into()),
-                    severity: SignalSeverity::Critical,
-                    status: SignalStatus::Active,
-                    confidence: Confidence::High,
-                    evidence: vec![],
-                },
-                attrs(),
-            ),
+            {
+                let kind = IncidentKind("bitcoin.no_peers".into());
+                Observation::incident_signal(
+                    ctx(at),
+                    IncidentSignalObservation {
+                        signal: SignalName::for_incident_kind(&kind),
+                        incident_kind: kind,
+                        severity: SignalSeverity::Critical,
+                        status: SignalStatus::Active,
+                        confidence: Confidence::High,
+                        evidence: vec![],
+                    },
+                    attrs(),
+                )
+            },
             Observation::diagnosis(
                 ctx(at),
                 DiagnosisObservation {
