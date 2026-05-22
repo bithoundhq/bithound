@@ -211,6 +211,7 @@ fn row_to_observation(row: &sqlx::sqlite::SqliteRow) -> Result<Observation, Stor
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::incidents::IncidentKind;
     use crate::observations::*;
     use crate::storage::sqlite::open_pool;
     use chrono::{Duration, TimeZone};
@@ -321,6 +322,7 @@ mod tests {
                 ctx(at),
                 IncidentSignalObservation {
                     signal: SignalName("bitcoin.no_peers".into()),
+                    incident_kind: IncidentKind("bitcoin.no_peers".into()),
                     severity: SignalSeverity::Critical,
                     status: SignalStatus::Active,
                     confidence: Confidence::High,

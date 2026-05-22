@@ -123,7 +123,7 @@ mod tests {
     ) -> NotificationAttempt {
         NotificationAttempt {
             id,
-            rule_id: NotificationRuleId::new(),
+            rule_id: NotificationRuleId("test-rule".into()),
             incident_id: incident,
             lifecycle_kind: IncidentNotificationEventKind::Opened,
             target_kind: TargetKind::Webhook,
