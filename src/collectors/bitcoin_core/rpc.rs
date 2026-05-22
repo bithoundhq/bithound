@@ -1,10 +1,18 @@
 //! `BitcoinCoreRpcCollector` — V0's first concrete `PollingCollector`.
 //!
 //! Per poll: four RPC calls (`getblockchaininfo`, `getmempoolinfo`,
-//! `getnetworkinfo`, `getpeerinfo`) in that order. Each successful call
-//! emits a state observation plus a health observation; the first
-//! failure short-circuits the batch into `ProbeResult::Failed`,
-//! preserving every successful observation in `partial_observations`.
+//! `getnetworkinfo`, `getpeerinfo`) issued in parallel via
+//! `tokio::join!`. Worst-case wall time per poll is one
+//! `timeout_per_rpc` window rather than four. Bitcoin Core's default
+//! `rpcworkers=16` handles four concurrent reads comfortably.
+//!
+//! Results are processed in spec order (blockchain, mempool, network,
+//! peers) so the output is deterministic regardless of which call
+//! settles first. Successful calls emit a state observation + a
+//! health observation (latency stamped). If any call fails the batch
+//! becomes `ProbeResult::Failed`; the first failure by spec order
+//! drives the `health` + `error` fields, every successful observation
+//! still lands in `partial_observations`.
 
 use std::time::Duration;
 
@@ -125,113 +133,135 @@ impl PollingCollector for BitcoinCoreRpcCollector {
 
     async fn poll(&self, ctx: CollectionContext) -> ObservationBatch {
         let started_at = Utc::now();
-        let mut partials: Vec<Observation> = Vec::with_capacity(8);
 
-        // 1. getblockchaininfo
-        let observed_at = Utc::now();
-        match self.client.get_blockchain_info().await {
+        // Fire all four RPCs concurrently. Each closure captures its
+        // own start/end timestamps so per-call latency stays accurate
+        // even though the futures interleave on the executor.
+        let (bc, mp, nw, pi) = tokio::join!(
+            timed(self.client.get_blockchain_info()),
+            timed(self.client.get_mempool_info()),
+            timed(self.client.get_network_info()),
+            timed(self.client.get_peer_info()),
+        );
+
+        let mut partials: Vec<Observation> = Vec::with_capacity(8);
+        let mut first_failure: Option<(
+            &'static str,
+            chrono::DateTime<Utc>,
+            chrono::DateTime<Utc>,
+            RpcError,
+        )> = None;
+
+        // Process in spec order so observation order and the
+        // "first failure" used for the health/error fields stay
+        // deterministic regardless of completion order.
+
+        let (s, e, r) = bc;
+        match r {
             Ok(info) => {
-                let latency_ms = duration_ms(observed_at, Utc::now());
                 partials.push(Observation::state(
-                    self.obs_context(&ctx.sidecar_id, observed_at),
+                    self.obs_context(&ctx.sidecar_id, s),
                     StateObservation::BitcoinBlockchain(blockchain_state(info)),
                     empty_attrs(),
                 ));
                 partials.push(Observation::health(
-                    self.obs_context(&ctx.sidecar_id, observed_at),
+                    self.obs_context(&ctx.sidecar_id, s),
                     HEALTH_BLOCKCHAIN,
                     HealthStatus::Ok,
-                    latency_ms,
+                    duration_ms(s, e),
                     None,
                     None,
                     empty_attrs(),
                 ));
             }
-            Err(err) => {
-                return self.failed(
-                    &ctx,
-                    started_at,
-                    HEALTH_BLOCKCHAIN,
-                    err,
-                    partials,
-                    observed_at,
-                );
-            }
+            Err(err) => first_failure = Some((HEALTH_BLOCKCHAIN, s, e, err)),
         }
 
-        // 2. getmempoolinfo
-        let observed_at = Utc::now();
-        match self.client.get_mempool_info().await {
+        let (s, e, r) = mp;
+        match r {
             Ok(info) => {
-                let latency_ms = duration_ms(observed_at, Utc::now());
                 partials.push(Observation::state(
-                    self.obs_context(&ctx.sidecar_id, observed_at),
+                    self.obs_context(&ctx.sidecar_id, s),
                     StateObservation::BitcoinMempool(mempool_state(info)),
                     empty_attrs(),
                 ));
                 partials.push(Observation::health(
-                    self.obs_context(&ctx.sidecar_id, observed_at),
+                    self.obs_context(&ctx.sidecar_id, s),
                     HEALTH_MEMPOOL,
                     HealthStatus::Ok,
-                    latency_ms,
+                    duration_ms(s, e),
                     None,
                     None,
                     empty_attrs(),
                 ));
             }
             Err(err) => {
-                return self.failed(&ctx, started_at, HEALTH_MEMPOOL, err, partials, observed_at);
+                if first_failure.is_none() {
+                    first_failure = Some((HEALTH_MEMPOOL, s, e, err));
+                }
             }
         }
 
-        // 3. getnetworkinfo
-        let observed_at = Utc::now();
-        match self.client.get_network_info().await {
+        let (s, e, r) = nw;
+        match r {
             Ok(info) => {
-                let latency_ms = duration_ms(observed_at, Utc::now());
                 partials.push(Observation::state(
-                    self.obs_context(&ctx.sidecar_id, observed_at),
+                    self.obs_context(&ctx.sidecar_id, s),
                     StateObservation::BitcoinNetwork(network_state(info)),
                     empty_attrs(),
                 ));
                 partials.push(Observation::health(
-                    self.obs_context(&ctx.sidecar_id, observed_at),
+                    self.obs_context(&ctx.sidecar_id, s),
                     HEALTH_NETWORK,
                     HealthStatus::Ok,
-                    latency_ms,
+                    duration_ms(s, e),
                     None,
                     None,
                     empty_attrs(),
                 ));
             }
             Err(err) => {
-                return self.failed(&ctx, started_at, HEALTH_NETWORK, err, partials, observed_at);
+                if first_failure.is_none() {
+                    first_failure = Some((HEALTH_NETWORK, s, e, err));
+                }
             }
         }
 
-        // 4. getpeerinfo
-        let observed_at = Utc::now();
-        match self.client.get_peer_info().await {
+        let (s, e, r) = pi;
+        match r {
             Ok(peers) => {
-                let latency_ms = duration_ms(observed_at, Utc::now());
                 partials.push(Observation::state(
-                    self.obs_context(&ctx.sidecar_id, observed_at),
+                    self.obs_context(&ctx.sidecar_id, s),
                     StateObservation::BitcoinPeerSummary(peer_summary_state(&peers)),
                     empty_attrs(),
                 ));
                 partials.push(Observation::health(
-                    self.obs_context(&ctx.sidecar_id, observed_at),
+                    self.obs_context(&ctx.sidecar_id, s),
                     HEALTH_PEERS,
                     HealthStatus::Ok,
-                    latency_ms,
+                    duration_ms(s, e),
                     None,
                     None,
                     empty_attrs(),
                 ));
             }
             Err(err) => {
-                return self.failed(&ctx, started_at, HEALTH_PEERS, err, partials, observed_at);
+                if first_failure.is_none() {
+                    first_failure = Some((HEALTH_PEERS, s, e, err));
+                }
             }
+        }
+
+        if let Some((target, observed_at, completed_at, err)) = first_failure {
+            return self.failed(
+                &ctx,
+                started_at,
+                target,
+                err,
+                partials,
+                observed_at,
+                completed_at,
+            );
         }
 
         let window = safe_probe_window(started_at, Utc::now());
@@ -245,7 +275,20 @@ impl PollingCollector for BitcoinCoreRpcCollector {
     }
 }
 
+/// Wrap a future so its start and end timestamps travel alongside the
+/// result. Used by `poll` to stamp per-call latency on health
+/// observations under `tokio::join!`.
+async fn timed<F: std::future::Future>(
+    future: F,
+) -> (chrono::DateTime<Utc>, chrono::DateTime<Utc>, F::Output) {
+    let start = Utc::now();
+    let result = future.await;
+    let end = Utc::now();
+    (start, end, result)
+}
+
 impl BitcoinCoreRpcCollector {
+    #[allow(clippy::too_many_arguments)]
     fn failed(
         &self,
         ctx: &CollectionContext,
@@ -254,10 +297,10 @@ impl BitcoinCoreRpcCollector {
         err: RpcError,
         partials: Vec<Observation>,
         observed_at: chrono::DateTime<Utc>,
+        completed_at: chrono::DateTime<Utc>,
     ) -> ObservationBatch {
         let kind = err.collection_error_kind();
         let message = err.to_string();
-        let completed_at = Utc::now();
         let latency_ms = duration_ms(observed_at, completed_at);
 
         let health = HealthCheckObservation {
@@ -268,7 +311,8 @@ impl BitcoinCoreRpcCollector {
             error: None,
         };
 
-        let window = safe_probe_window(started_at, completed_at);
+        let batch_end = Utc::now();
+        let window = safe_probe_window(started_at, batch_end.max(completed_at));
         self.build_batch(
             ctx.sidecar_id.clone(),
             window,
@@ -286,12 +330,15 @@ const HEALTH_MEMPOOL: &str = "bitcoin.rpc.getmempoolinfo";
 const HEALTH_NETWORK: &str = "bitcoin.rpc.getnetworkinfo";
 const HEALTH_PEERS: &str = "bitcoin.rpc.getpeerinfo";
 
+fn empty_attrs() -> Attributes {
+    Attributes(std::collections::BTreeMap::new())
+}
+
 /// Construct a `ProbeWindow` defensively. A backwards clock jump
 /// between `started_at` and `completed_at` collapses to a zero-width
-/// window pinned at the later instant instead of panicking. Both the
-/// success and failure paths use this so an NTP correction mid-poll
-/// can't crash the poll task on one path while silently producing
-/// stretched windows on the other.
+/// window pinned at the later instant instead of panicking — matches
+/// the failure path's old fallback so the success path doesn't crash
+/// the poll task on NTP correction.
 fn safe_probe_window(
     started_at: chrono::DateTime<Utc>,
     completed_at: chrono::DateTime<Utc>,
@@ -306,17 +353,6 @@ fn duration_ms(from: chrono::DateTime<Utc>, to: chrono::DateTime<Utc>) -> Option
         None
     } else {
         Some(ms as u64)
-    }
-}
-
-fn empty_attrs() -> Attributes {
-    Attributes(std::collections::BTreeMap::new())
-}
-
-fn health_status_for(err: &RpcError) -> HealthStatus {
-    match err {
-        RpcError::Auth | RpcError::HttpStatus(_) => HealthStatus::Critical,
-        _ => HealthStatus::Critical,
     }
 }
 
@@ -404,6 +440,10 @@ mod tests {
 
     enum Reply {
         Json(serde_json::Value),
+        /// Like `Json` but sleeps before responding. Lets parallelism
+        /// tests detect whether four 200ms RPCs take ~200ms (parallel)
+        /// or ~800ms (sequential).
+        DelayedJson(std::time::Duration, serde_json::Value),
         Status(u16),
         Hang,
     }
@@ -447,6 +487,19 @@ mod tests {
                         Reply::Json(mut value) => {
                             // Echo the request id into the response envelope so the
                             // client's id-correlation check passes by default.
+                            if let Some(obj) = value.as_object_mut() {
+                                obj.insert("id".to_string(), request_id);
+                            }
+                            let body = serde_json::to_vec(&value).unwrap();
+                            let response = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                body.len()
+                            );
+                            socket.write_all(response.as_bytes()).await.ok();
+                            socket.write_all(&body).await.ok();
+                        }
+                        Reply::DelayedJson(delay, mut value) => {
+                            tokio::time::sleep(delay).await;
                             if let Some(obj) = value.as_object_mut() {
                                 obj.insert("id".to_string(), request_id);
                             }
@@ -680,6 +733,47 @@ mod tests {
             }
         }
         assert!(saw_blockchain && saw_mempool && saw_network && saw_peer);
+    }
+
+    #[tokio::test]
+    async fn poll_issues_rpcs_in_parallel_not_serial() {
+        // Each RPC sleeps 200ms before responding. Sequential execution
+        // would take ~800ms total; parallel execution should complete in
+        // roughly one delay window. Bound the assertion well below the
+        // sequential floor and well above expected parallel runtime to
+        // stay reliable on a busy CI host.
+        const RPC_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
+        let addr = spawn_mock(|method, _| match method {
+            "getblockchaininfo" => Reply::DelayedJson(RPC_DELAY, ok_blockchain()),
+            "getmempoolinfo" => Reply::DelayedJson(RPC_DELAY, ok_mempool()),
+            "getnetworkinfo" => Reply::DelayedJson(RPC_DELAY, ok_network()),
+            "getpeerinfo" => Reply::DelayedJson(RPC_DELAY, ok_peers()),
+            other => panic!("unexpected method {}", other),
+        })
+        .await;
+
+        let collector = BitcoinCoreRpcCollector::new(
+            descriptor(),
+            connection(addr),
+            reqwest::Client::new(),
+            Default::default(),
+        )
+        .expect("ctor");
+
+        let start = std::time::Instant::now();
+        let batch = collector.poll(ctx()).await;
+        let elapsed = start.elapsed();
+
+        assert!(matches!(batch.result, ProbeResult::Ok { .. }));
+        // Sequential floor is 4 × 200ms = 800ms. A well-functioning
+        // parallel poll lands near 200ms; allow a generous 600ms ceiling
+        // so a slow CI runner still passes while a regression to serial
+        // RPC issuance trips the bound.
+        assert!(
+            elapsed < std::time::Duration::from_millis(600),
+            "poll took {:?} — expected parallel execution (<600ms), got near-sequential",
+            elapsed
+        );
     }
 
     // ── failure paths ──────────────────────────────────────────────
