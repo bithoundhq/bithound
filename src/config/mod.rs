@@ -483,7 +483,22 @@ mod tests {
             }
         ));
         assert!(cfg.notifications.telegram.is_some());
-        assert_eq!(cfg.notification_rules.len(), 1);
+        assert_eq!(cfg.notification_rules.len(), 3);
+
+        // The sample exercises all three target variants so any
+        // schema change that drops one breaks here.
+        let kinds: Vec<&'static str> = cfg
+            .notification_rules
+            .iter()
+            .map(|r| match &r.target {
+                notifications::NotificationTargetConfig::Telegram { .. } => "telegram",
+                notifications::NotificationTargetConfig::Discord { .. } => "discord",
+                notifications::NotificationTargetConfig::Webhook { .. } => "webhook",
+            })
+            .collect();
+        assert!(kinds.contains(&"telegram"));
+        assert!(kinds.contains(&"discord"));
+        assert!(kinds.contains(&"webhook"));
     }
 
     #[test]

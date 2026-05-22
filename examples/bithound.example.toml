@@ -69,3 +69,26 @@ event_kinds = []   # empty = all kinds
 [notification_rules.target]
 type = "telegram"
 chat_id = -1001234567890
+
+[[notification_rules]]
+id = "00000000-0000-7000-8000-000000000002"
+name = "warnings-to-discord-ops"
+enabled = true
+min_severity = "warning"
+event_kinds = []
+
+[notification_rules.target]
+type = "discord"
+webhook_env = "BITHOUND_OPS_DISCORD_WEBHOOK"
+# thread_id = 1234567890123456789  # optional — omit to post in the channel itself
+
+[[notification_rules]]
+id = "00000000-0000-7000-8000-000000000003"
+name = "critical-to-pagerduty"
+enabled = true
+min_severity = "critical"
+event_kinds = []
+
+[notification_rules.target]
+type = "webhook"
+url_env = "BITHOUND_OPS_PAGERDUTY_WEBHOOK"
