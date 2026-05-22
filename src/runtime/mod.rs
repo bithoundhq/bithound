@@ -3,4 +3,6 @@
 //! drives shutdown.
 
 pub mod bootstrap;
+pub mod consumer;
+pub mod notification_worker;
 pub mod supervisor;
