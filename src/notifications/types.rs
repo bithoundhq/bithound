@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    incidents::{IncidentKind, IncidentLifecycleEvent, IncidentSeverity},
+    incidents::{
+        IncidentKind, IncidentLifecycleEvent, IncidentNotificationEventKind, IncidentSeverity,
+    },
     notifications::targets::{
         discord::{DiscordChannelId, DiscordTarget},
         telegram::{TelegramChatId, TelegramTarget},
@@ -63,16 +65,90 @@ pub struct NotificationMessage {
     pub occurred_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone)]
+/// Persisted record of a notification dispatch attempt.
+///
+/// Per-row immutable: initial dispatch inserts the row with
+/// `status = Pending`, then a single UPDATE moves it to a terminal status.
+/// Retries don't mutate the row — they INSERT a new one with
+/// `attempt_number + 1` and `parent_attempt_id` pointing back. In V0 the
+/// retry path is unused (audit-only); `next_retry_at` is always `None`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationAttempt {
     pub id: NotificationAttemptId,
     pub rule_id: NotificationRuleId,
-    pub incident_lifecycle_event: IncidentLifecycleEvent,
-    pub target: NotificationTarget,
+    pub incident_id: IncidentId,
+    pub lifecycle_kind: IncidentNotificationEventKind,
+
+    pub target_kind: TargetKind,
+    /// Human-readable, redacted target description.
+    ///
+    /// Full targets carry `SecretString`; those are never persisted. The
+    /// summary uses sketches like `telegram:chat_id=-1001234` or
+    /// `webhook:host=ops.example.com`.
+    pub target_summary: String,
+
     pub status: NotificationDeliveryStatus,
+    pub attempt_number: u32,
+    pub parent_attempt_id: Option<NotificationAttemptId>,
+    /// Only set when `status == FailedTransient` (V0.1+). V0 always `None`.
+    pub next_retry_at: Option<DateTime<Utc>>,
+
+    /// `None` while `status == Pending`; populated on terminal UPDATE.
+    pub outcome: Option<DeliveryOutcome>,
+    pub external_ref: Option<ExternalMessageRef>,
+
     pub attempted_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
-    pub error: Option<String>,
+}
+
+/// Discriminant for the target a [`NotificationAttempt`] dispatched to.
+///
+/// Pulled out of the persisted form so that the secret material in
+/// [`NotificationTarget`] never reaches storage.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TargetKind {
+    Telegram,
+    Discord,
+    Webhook,
+    #[cfg(debug_assertions)]
+    Stdout,
+}
+
+impl TargetKind {
+    /// Convert a live [`NotificationTarget`] into its persistable
+    /// `(TargetKind, target_summary)` pair. None of these contain the
+    /// underlying secret.
+    pub fn summarize(target: &NotificationTarget) -> (Self, String) {
+        match target {
+            #[cfg(debug_assertions)]
+            NotificationTarget::Stdout => (TargetKind::Stdout, "stdout".into()),
+            NotificationTarget::Telegram(t) => (
+                TargetKind::Telegram,
+                format!("telegram:chat_id={}", t.chat_id.0),
+            ),
+            NotificationTarget::Discord(t) => (
+                TargetKind::Discord,
+                format!("discord:webhook=host={}", host_of_secret_url(&t.webhook_url)),
+            ),
+            NotificationTarget::Webhook(t) => (
+                TargetKind::Webhook,
+                format!("webhook:host={}", host_of_secret_url(&t.url)),
+            ),
+        }
+    }
+}
+
+fn host_of_secret_url(s: &secrecy::SecretString) -> String {
+    use secrecy::ExposeSecret;
+    let raw = s.expose_secret();
+    // No URL parser dep — split on '/' manually to extract host, never log the value.
+    raw.split("://")
+        .nth(1)
+        .and_then(|rest| rest.split('/').next())
+        .map(|host_port| host_port.split('@').next_back().unwrap_or(host_port))
+        .map(|host_port| host_port.split(':').next().unwrap_or(host_port))
+        .unwrap_or("unknown")
+        .to_string()
 }
 
 #[derive(Debug, Clone)]
@@ -104,7 +180,16 @@ pub enum NotificationKind {
 pub enum NotificationDeliveryStatus {
     Pending,
     Succeeded,
-    Failed,
+    /// Terminal-for-this-row; the row stays at this status while the V0.1
+    /// retry scheduler creates a new row with `attempt_number + 1`. In V0
+    /// (audit-only) this state is unused — a protocol-level transient that
+    /// exhausts retries in V0 lands as `FailedPermanent` with
+    /// `outcome_kind = 'Transient'`.
+    FailedTransient,
+    FailedPermanent,
+    /// Dispatch dropped by a suppression rule. Recorded with
+    /// `DeliveryOutcome::Suppressed` in `outcome_json` for audit.
+    Suppressed,
 }
 
 #[derive(Debug, Clone)]
