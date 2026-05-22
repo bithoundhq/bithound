@@ -1,4 +1,5 @@
 mod collectors;
+mod config;
 mod diagnostics;
 mod incidents;
 mod notifications;
