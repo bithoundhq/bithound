@@ -101,11 +101,32 @@ impl WebhookSender {
     }
 }
 
+/// Parse RFC 7231 `Retry-After`. Accepts either an integer number of
+/// seconds (e.g. `Retry-After: 120`) or an HTTP-date
+/// (e.g. `Retry-After: Wed, 21 Oct 2026 07:28:00 GMT`). HTTP-date is
+/// converted to "seconds from now" using the current wall clock.
+/// Clamps to [0, 1 hour] so a hostile upstream cannot schedule a
+/// retry trillions of years in the future.
 fn parse_retry_after_seconds(header: Option<&HeaderValue>) -> Option<ChronoDuration> {
-    header
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.trim().parse::<i64>().ok())
-        .map(ChronoDuration::seconds)
+    let raw = header.and_then(|v| v.to_str().ok()).map(str::trim)?;
+    const MAX_SECS: i64 = 3_600;
+
+    if let Ok(secs) = raw.parse::<i64>() {
+        let bounded = secs.clamp(0, MAX_SECS);
+        return Some(ChronoDuration::seconds(bounded));
+    }
+
+    // HTTP-date format. chrono's parse_from_rfc2822 covers the
+    // RFC 7231 IMF-fixdate / RFC 850 / asctime-style families that
+    // Retry-After permits in practice.
+    if let Ok(when) = chrono::DateTime::parse_from_rfc2822(raw) {
+        let now = chrono::Utc::now();
+        let delta = when.with_timezone(&chrono::Utc) - now;
+        let secs = delta.num_seconds().clamp(0, MAX_SECS);
+        return Some(ChronoDuration::seconds(secs));
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -352,6 +373,54 @@ mod tests {
                 error: PermanentError::BadRequest { detail },
             } => assert!(detail.contains("invalid header name")),
             other => panic!("expected BadRequest, got {:?}", other),
+        }
+    }
+
+    /// RFC 7231 also allows `Retry-After: HTTP-date`. Confirm we parse
+    /// it as "seconds from now" instead of returning None and losing
+    /// the upstream's backoff guidance.
+    #[tokio::test]
+    async fn http_429_with_retry_after_http_date_is_parsed() {
+        // Build a date a few seconds in the future so the parser
+        // converts it to a small positive duration without flaking.
+        let future = chrono::Utc::now() + ChronoDuration::seconds(45);
+        let http_date = future.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
+        let http_date_clone = http_date.clone();
+        let (addr, _cap) = spawn_mock(move || {
+            Reply::Status(429, vec![("Retry-After", http_date_clone.clone())], "")
+        })
+        .await;
+        let r = sender().send(&target_for(addr, vec![]), &payload()).await;
+        match r.outcome {
+            DeliveryOutcome::Transient {
+                error: TransientError::RateLimited,
+                retry_after: Some(d),
+            } => {
+                // Allow ±5s wiggle room for clock drift between the
+                // mock construction and the parser running.
+                assert!(d >= ChronoDuration::seconds(30), "got {:?}", d);
+                assert!(d <= ChronoDuration::seconds(60), "got {:?}", d);
+            }
+            other => panic!(
+                "expected RateLimited with parsed retry_after, got {:?}",
+                other
+            ),
+        }
+    }
+
+    /// Defend against a hostile `Retry-After: <huge number>` that
+    /// would otherwise schedule the next attempt years in the future.
+    #[tokio::test]
+    async fn retry_after_clamps_to_one_hour() {
+        let (addr, _cap) =
+            spawn_mock(|| Reply::Status(429, vec![("Retry-After", "999999999".into())], "")).await;
+        let r = sender().send(&target_for(addr, vec![]), &payload()).await;
+        match r.outcome {
+            DeliveryOutcome::Transient {
+                error: TransientError::RateLimited,
+                retry_after: Some(d),
+            } => assert_eq!(d, ChronoDuration::seconds(3_600)),
+            other => panic!("expected clamped RateLimited, got {:?}", other),
         }
     }
 }
