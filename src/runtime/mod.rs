@@ -64,6 +64,12 @@ pub enum RuntimeError {
 ///      RuntimeConfig::shutdown_deadline_seconds) so a stuck task
 ///      can't pin the supervisor forever.
 pub async fn run(deps: RuntimeDeps) -> Result<(), RuntimeError> {
+    // Capture the sidecar's start time before any task spawn so
+    // /health.uptime_seconds reports time-since-sidecar-start, not
+    // time-since-API-task-start. The API task may be the last task
+    // spawned (and may even be disabled entirely), so measuring its
+    // age would give operators a misleading number.
+    let started_at = std::time::Instant::now();
     let polling_count = deps.polling_collectors.len();
     let subscription_count = deps.subscription_collectors.len();
     let collectors: Vec<&dyn PollingCollector> =
@@ -163,7 +169,7 @@ pub async fn run(deps: RuntimeDeps) -> Result<(), RuntimeError> {
         let api_deps = ApiDeps {
             sidecar_id: deps.sidecar_id.clone(),
             sidecar_version: deps.sidecar_version,
-            started_at: std::time::Instant::now(),
+            started_at,
             incident_repo: Arc::clone(&deps.incident_repo),
             observation_store: Arc::clone(&deps.observation_store),
             attempts_repo: Arc::clone(&deps.attempts_repo),

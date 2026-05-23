@@ -140,7 +140,7 @@ impl EvidenceObservationDto {
                 collector_id: obs.source.collector.id.0.clone(),
                 sidecar_id: obs.source.sidecar_id.0,
             },
-            origin: format!("{:?}", obs.origin),
+            origin: obs.origin.as_str().to_string(),
             payload,
         })
     }

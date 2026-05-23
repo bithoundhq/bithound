@@ -48,6 +48,26 @@ method so the API can answer single-row reads through the primary-key
 index instead of iterating; SQLite and in-memory impls both
 implemented.
 
+### Fixed
+
+Pre-landing review found four small issues; all fixed in the same
+version:
+
+- `/health.uptime_seconds` reports time since sidecar start, not time
+  since the API task started. Was off by however long the consumer +
+  notification worker took to spin up; operators monitoring "is the
+  sidecar fresh after a restart?" now get the right number.
+- API 500 responses and the corresponding `tracing::error!` log now
+  include the underlying storage error message. The `ApiError`
+  display strings previously dropped the `RepoError` / `StoreError`
+  detail, leaving operators staring at "storage error: storage error"
+  in their logs.
+- `/incidents/:id/evidence` `origin` field uses a stable enum→string
+  mapping on `ObservationOrigin` instead of `format!("{:?}", ...)`.
+  A future variant rename can't silently change the API.
+- `tower` moved to `[dev-dependencies]` — it was a build-time only
+  helper for the integration tests.
+
 304 tests pass (was 286 before Phase A).
 
 ## [0.0.6.1] - 2026-05-23

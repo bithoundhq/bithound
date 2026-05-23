@@ -25,7 +25,6 @@ teloxide = "0.17.0"
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["full"] }
 toml = "1.1.2"
-tower = "0.5"
 tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
@@ -34,3 +33,4 @@ uuid = { version = "1.23.1", features = ["v7", "serde"] }
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1.52.3", features = ["full", "test-util"] }
+tower = "0.5"

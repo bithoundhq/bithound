@@ -32,10 +32,10 @@ pub enum ApiError {
     #[error("bad request: {0}")]
     BadRequest(String),
 
-    #[error("storage error")]
+    #[error("storage error: {0}")]
     Storage(#[from] crate::incidents::repository::RepoError),
 
-    #[error("observation store error")]
+    #[error("observation store error: {0}")]
     ObservationStore(#[from] crate::storage::traits::StoreError),
 
     #[error("serialization: {0}")]
