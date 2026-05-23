@@ -44,6 +44,7 @@ letter; document its scope at the top of the first ADR in the cluster.
 - [ADR-C1 — Two collector traits](c1.md)
 - [ADR-C2 — Polling output is `ObservationBatch` directly](c2.md)
 - [ADR-C3 — Collector small calls](c3.md)
+- [ADR-C4 — ZMQ subscription collector (Deferred to v1.0)](c4.md)
 
 ### S cluster — runtime supervision
 

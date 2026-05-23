@@ -37,6 +37,7 @@
 - [ADR-C1 — Two collector traits](adr/c1.md)
 - [ADR-C2 — Polling output is ObservationBatch directly](adr/c2.md)
 - [ADR-C3 — Collector small calls](adr/c3.md)
+- [ADR-C4 — ZMQ subscription collector (Deferred to v1.0)](adr/c4.md)
 - [ADR-S1 — Per-collector tasks + central consumer](adr/s1.md)
 - [ADR-S2 — Per-batch rule evaluation](adr/s2.md)
 - [ADR-S3 — Runtime small calls](adr/s3.md)
