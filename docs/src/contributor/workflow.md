@@ -43,20 +43,44 @@ GitHub may merge the second with a stale first-parent and the changes
 won't appear on `main`'s first-parent path. Click *Update branch* on
 the second PR before clicking *Merge*.
 
+## Phase bundles
+
+Most BTH tickets ship one-per-PR. A small number of phases (Phase 10
+runtime, Phase 11 rules, Phase 12 e2e + docs) bundle 2–5 tickets into
+a single PR with one commit per ticket plus a `chore:` commit for
+`VERSION` + `CHANGELOG`. Bundle only when the tickets are tightly
+coupled and reviewing them together is easier than reviewing them
+apart; document the bundling decision in the PR body's "Deviations
+from spec" section.
+
 ## CI gates
 
-`.github/workflows/rust.yml` runs `cargo fmt --check`, `cargo clippy
--- -D warnings`, `cargo build --verbose`, and `cargo test --verbose`
-on every PR to `main`. Expect a sizeable pile of `dead_code` warnings
-while the runtime is being assembled — those are types declared ahead
-of the code that will use them. They turn into errors under
-`-D warnings`, so don't add new ones casually; otherwise leave them
-alone.
+`.github/workflows/rust.yml` runs `cargo fmt --check`,
+`cargo clippy -- -D warnings`, `cargo build --verbose`, and
+`cargo test --verbose` on every PR to `main`. All four must pass.
+The 230+ unit tests run on every push; the one `#[ignore]`-gated
+end-to-end integration test under `tests/e2e_tip_lag.rs` is
+opt-in only — CI does not run it.
+
+`#[allow(dead_code)]` lives crate-wide in `src/main.rs`. It started
+out covering the typed domain model that landed ahead of the runtime
+in V0; today most of those types are wired. Don't add new
+`dead_code` casually — if you find yourself reaching for it,
+chances are the code is genuinely unused and should be deleted.
+
+## Version + CHANGELOG
+
+Bithound uses a 4-digit `MAJOR.MINOR.PATCH.MICRO` version in
+`VERSION`, separate from `Cargo.toml`'s semver-style version
+(which stays at `0.1.0` for V0). Every PR that ships a feature or
+fix bumps the 4-digit `VERSION` and adds a CHANGELOG entry. PR
+titles are version-prefixed (e.g. `v0.0.5.0 Phase 12: ...`).
 
 ## What goes in the diff
 
-- One ticket's worth of changes, no drive-bys.
-- Never `git add -A` or `git add .`. Stage specific files. The working
-  tree often has pre-session edits to `Cargo.lock` and similar that
-  must not get pulled into a ticket commit.
+- One ticket's worth of changes (or one phase bundle), no drive-bys.
+- Never `git add -A` or `git add .`. Stage specific files. The
+  working tree often has pre-session edits to `Cargo.lock` and
+  similar that must not get pulled into a ticket commit. Use
+  `git stash push <paths>` if needed.
 - Do not commit unless asked. PRs are merged by the project owner.
