@@ -381,7 +381,10 @@ allows_dimension = false
         assert_eq!(spec.source, KindSource::UserConfig);
 
         let ok = draft(
-            EntityRef::LndChannel(LndChannelId("chan1".into())),
+            EntityRef::LndChannel {
+                node_id: LndNodeId("ln-a".into()),
+                channel_id: LndChannelId("chan1".into()),
+            },
             "operator.custom_check",
             None,
         );

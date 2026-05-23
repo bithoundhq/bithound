@@ -37,7 +37,8 @@ impl ObservationStore for SqliteObservationStore {
         }
         let mut tx = self.pool.begin().await?;
         for obs in batch {
-            let (subject_kind, subject_id) = subject_to_pair(&obs.subject);
+            let subject_kind = obs.subject.subject_kind_str();
+            let subject_id = obs.subject.subject_id_str();
             let integration_json = serde_json::to_string(&obs.source.collector.integration)?;
             let origin = origin_str(&obs.origin);
             let payload_kind = payload_kind(&obs.payload);
@@ -104,31 +105,61 @@ fn nanos_to_observed(n: i64) -> DateTime<Utc> {
     DateTime::<Utc>::from_timestamp_nanos(n)
 }
 
-fn subject_to_pair(subject: &EntityRef) -> (&'static str, &str) {
-    match subject {
-        EntityRef::Host(id) => ("host", id.0.as_str()),
-        EntityRef::BitcoinNode(id) => ("bitcoin_node", id.0.as_str()),
-        EntityRef::BitcoinPeer(id) => ("bitcoin_peer", id.0.as_str()),
-        EntityRef::LndNode(id) => ("lnd_node", id.0.as_str()),
-        EntityRef::LndPeer(id) => ("lnd_peer", id.0.as_str()),
-        EntityRef::LndChannel(id) => ("lnd_channel", id.0.as_str()),
-        EntityRef::LndInvoice(id) => ("lnd_invoice", id.0.as_str()),
-    }
-}
-
+/// Reverse of [`EntityRef::subject_kind_str`] + [`EntityRef::subject_id_str`].
+///
+/// Scoped sub-entity variants land in storage as `<node_id>/<sub_id>`
+/// (see ADR-N1 §N1.3); on read-back the slash splits the two halves.
 fn subject_from_pair(kind: &str, id: &str) -> Result<EntityRef, StoreError> {
     match kind {
+        "sidecar" => {
+            let uuid = uuid::Uuid::parse_str(id).map_err(|e| {
+                StoreError::Corruption(format!("sidecar subject_id is not a UUID: {e}"))
+            })?;
+            Ok(EntityRef::Sidecar(SidecarId(uuid)))
+        }
         "host" => Ok(EntityRef::Host(HostId(id.to_string()))),
         "bitcoin_node" => Ok(EntityRef::BitcoinNode(BitcoinNodeId(id.to_string()))),
-        "bitcoin_peer" => Ok(EntityRef::BitcoinPeer(BitcoinPeerId(id.to_string()))),
+        "bitcoin_peer" => {
+            let (node, peer) = split_scoped(id, kind)?;
+            Ok(EntityRef::BitcoinPeer {
+                node_id: BitcoinNodeId(node.to_string()),
+                peer_id: BitcoinPeerId(peer.to_string()),
+            })
+        }
         "lnd_node" => Ok(EntityRef::LndNode(LndNodeId(id.to_string()))),
-        "lnd_peer" => Ok(EntityRef::LndPeer(LndPeerId(id.to_string()))),
-        "lnd_channel" => Ok(EntityRef::LndChannel(LndChannelId(id.to_string()))),
-        "lnd_invoice" => Ok(EntityRef::LndInvoice(LndInvoiceId(id.to_string()))),
+        "lnd_peer" => {
+            let (node, peer) = split_scoped(id, kind)?;
+            Ok(EntityRef::LndPeer {
+                node_id: LndNodeId(node.to_string()),
+                peer_id: LndPeerId(peer.to_string()),
+            })
+        }
+        "lnd_channel" => {
+            let (node, channel) = split_scoped(id, kind)?;
+            Ok(EntityRef::LndChannel {
+                node_id: LndNodeId(node.to_string()),
+                channel_id: LndChannelId(channel.to_string()),
+            })
+        }
+        "lnd_invoice" => {
+            let (node, invoice) = split_scoped(id, kind)?;
+            Ok(EntityRef::LndInvoice {
+                node_id: LndNodeId(node.to_string()),
+                invoice_id: LndInvoiceId(invoice.to_string()),
+            })
+        }
         other => Err(StoreError::Corruption(format!(
             "unknown subject_kind in observations row: {other}"
         ))),
     }
+}
+
+fn split_scoped<'a>(id: &'a str, kind: &str) -> Result<(&'a str, &'a str), StoreError> {
+    id.split_once('/').ok_or_else(|| {
+        StoreError::Corruption(format!(
+            "scoped subject_kind {kind:?} expects 'node_id/sub_id' but got {id:?}"
+        ))
+    })
 }
 
 fn origin_str(origin: &ObservationOrigin) -> &'static str {
