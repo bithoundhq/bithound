@@ -264,7 +264,7 @@ mod tests {
             ),
             Observation::capability(
                 ctx(at),
-                "bitcoin.rpc",
+                CapabilityName::parse("bitcoin.rpc").expect("valid"),
                 CapabilityStatus::Available,
                 None,
                 attrs(),

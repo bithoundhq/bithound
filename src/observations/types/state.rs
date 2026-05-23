@@ -29,24 +29,75 @@ impl StateObservation {
     /// asserts parity; adding a variant without updating both will fail
     /// the build.
     pub fn name(&self) -> StateName {
-        StateName(
-            match self {
-                Self::BitcoinBlockchain(_) => well_known::BITCOIN_BLOCKCHAIN,
-                Self::BitcoinMempool(_) => well_known::BITCOIN_MEMPOOL,
-                Self::BitcoinNetwork(_) => well_known::BITCOIN_NETWORK,
-                Self::BitcoinPeerSummary(_) => well_known::BITCOIN_PEER_SUMMARY,
-                Self::LndNode(_) => well_known::LND_NODE,
-                Self::LndWallet(_) => well_known::LND_WALLET,
-                Self::LndChannelSummary(_) => well_known::LND_CHANNEL_SUMMARY,
-                Self::Host(_) => well_known::HOST_SYSTEM,
-            }
-            .to_string(),
-        )
+        StateName::from_well_known(match self {
+            Self::BitcoinBlockchain(_) => well_known::BITCOIN_BLOCKCHAIN,
+            Self::BitcoinMempool(_) => well_known::BITCOIN_MEMPOOL,
+            Self::BitcoinNetwork(_) => well_known::BITCOIN_NETWORK,
+            Self::BitcoinPeerSummary(_) => well_known::BITCOIN_PEER_SUMMARY,
+            Self::LndNode(_) => well_known::LND_NODE,
+            Self::LndWallet(_) => well_known::LND_WALLET,
+            Self::LndChannelSummary(_) => well_known::LND_CHANNEL_SUMMARY,
+            Self::Host(_) => well_known::HOST_SYSTEM,
+        })
     }
 }
 
+/// Canonical name for a state observation (e.g. `bitcoin.blockchain`).
+///
+/// Constructed only through [`StateName::parse`] or
+/// [`StateName::from_well_known`]; the inner field is private so
+/// callers can't bypass validation by wrapping arbitrary strings (per
+/// ADR-D2).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct StateName(pub String);
+#[serde(try_from = "String", into = "String")]
+pub struct StateName(String);
+
+impl StateName {
+    pub fn parse(s: impl AsRef<str>) -> Result<Self, crate::shared::parse::ParseDottedNameError> {
+        crate::shared::parse::parse_dotted_name(s.as_ref()).map(Self)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Lift a `&'static str` known to satisfy the grammar. Debug-asserts
+    /// the parse rule; release builds skip the check (BTH-6's parity
+    /// test in this module guarantees every `well_known::*` constant
+    /// satisfies the grammar).
+    pub fn from_well_known(name: &'static str) -> Self {
+        debug_assert!(
+            crate::shared::parse::parse_dotted_name(name).is_ok(),
+            "invalid well_known state name: {name}"
+        );
+        StateName(name.to_string())
+    }
+}
+
+impl AsRef<str> for StateName {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for StateName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl TryFrom<String> for StateName {
+    type Error = crate::shared::parse::ParseDottedNameError;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Self::parse(s)
+    }
+}
+
+impl From<StateName> for String {
+    fn from(n: StateName) -> String {
+        n.0
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum StateValue {
@@ -225,7 +276,7 @@ mod tests {
     fn each_variant_name_is_a_well_known_constant() {
         let well_known: HashSet<&'static str> = well_known::ALL.iter().copied().collect();
         for variant in one_of_each_variant() {
-            let name = variant.name().0;
+            let name = variant.name();
             assert!(
                 well_known.contains(name.as_str()),
                 "variant {:?} produced name {name:?} not in well_known::ALL",
@@ -238,7 +289,7 @@ mod tests {
     fn parity_variants_match_well_known() {
         let from_variants: HashSet<String> = one_of_each_variant()
             .into_iter()
-            .map(|v| v.name().0)
+            .map(|v| v.name().as_str().to_string())
             .collect();
         let from_constants: HashSet<String> =
             well_known::ALL.iter().map(|s| s.to_string()).collect();
@@ -246,6 +297,18 @@ mod tests {
             from_variants, from_constants,
             "StateObservation variants and well_known::ALL must be in 1:1 correspondence"
         );
+    }
+
+    /// Every well-known state name must satisfy the shared dotted-name
+    /// grammar so `StateName::from_well_known` is a safe fast path in
+    /// release builds (where the debug-assert is compiled out). This
+    /// is what makes [`StateObservation::name`] panic-free.
+    #[test]
+    fn all_well_known_state_names_parse() {
+        for name in well_known::ALL {
+            crate::shared::parse::parse_dotted_name(name)
+                .unwrap_or_else(|e| panic!("well_known constant {name:?} fails parse: {e}"));
+        }
     }
 
     #[test]
@@ -345,7 +408,7 @@ mod tests {
             ),
         ];
         for (variant, expected) in cases {
-            assert_eq!(variant.name().0, expected);
+            assert_eq!(variant.name().as_str(), expected);
         }
     }
 }

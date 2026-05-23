@@ -275,7 +275,7 @@ mod tests {
         // Capability
         let cap_obs = Observation::capability(
             ctx(alice.clone(), t0()),
-            "bitcoin.zmq.rawtx",
+            CapabilityName::parse("bitcoin.zmq.rawtx").expect("valid"),
             CapabilityStatus::Available,
             None,
             Attributes(BTreeMap::new()),
@@ -314,7 +314,7 @@ mod tests {
         let state = StateReadModel::latest_state(
             &store,
             &alice,
-            &StateName(crate::observations::state::well_known::BITCOIN_BLOCKCHAIN.to_string()),
+            &StateName::from_well_known(crate::observations::state::well_known::BITCOIN_BLOCKCHAIN),
         )
         .expect("state");
         match state.value {
@@ -341,7 +341,7 @@ mod tests {
         let cap = CapabilityReadModel::current_capability(
             &store,
             &alice,
-            &CapabilityName("bitcoin.zmq.rawtx".into()),
+            &CapabilityName::parse("bitcoin.zmq.rawtx").expect("valid"),
         )
         .expect("capability");
         assert_eq!(cap.value.status, CapabilityStatus::Available);

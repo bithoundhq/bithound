@@ -76,7 +76,7 @@ impl Observation {
 
     pub fn capability(
         ctx: ObservationContext,
-        name: impl Into<String>,
+        name: CapabilityName,
         status: CapabilityStatus,
         reason: Option<String>,
         attributes: Attributes,
@@ -90,7 +90,7 @@ impl Observation {
             origin: ctx.origin,
             attributes,
             payload: ObservationPayload::Capability(CapabilityObservation {
-                capability: CapabilityName(name.into()),
+                capability: name,
                 status,
                 reason,
             }),
