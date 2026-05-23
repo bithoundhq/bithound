@@ -50,3 +50,35 @@ CREATE TABLE suppression_rules (
 
 CREATE INDEX idx_supp_fingerprint ON suppression_rules (fingerprint, until);
 CREATE INDEX idx_supp_until       ON suppression_rules (until);
+
+-- ADR-P3 §P3.2: Notification dispatch audit log.
+-- One row per dispatch attempt. Rows are INSERTed at status=Pending and
+-- UPDATEd exactly once to a terminal status. V0 ships audit-only; the
+-- retry columns (attempt_number, parent_attempt_id, next_retry_at) are
+-- forward-compat for V0.1's retry scheduler.
+CREATE TABLE notification_attempts (
+    id                BLOB PRIMARY KEY,
+    rule_id           BLOB NOT NULL,
+    incident_id       BLOB NOT NULL,
+    lifecycle_kind    TEXT NOT NULL,
+
+    target_kind       TEXT NOT NULL,
+    target_summary    TEXT NOT NULL,
+
+    status            TEXT NOT NULL,
+    attempt_number    INTEGER NOT NULL,
+    parent_attempt_id BLOB,
+    next_retry_at     INTEGER,
+
+    outcome_kind      TEXT,
+    outcome_json      TEXT,
+    external_ref_json TEXT,
+
+    attempted_at      INTEGER NOT NULL,
+    completed_at      INTEGER
+) STRICT;
+
+CREATE INDEX idx_attempts_incident_id       ON notification_attempts (incident_id);
+CREATE INDEX idx_attempts_rule_id           ON notification_attempts (rule_id);
+CREATE INDEX idx_attempts_status_next_retry ON notification_attempts (status, next_retry_at);
+CREATE INDEX idx_attempts_attempted_at      ON notification_attempts (attempted_at DESC);
