@@ -1,4 +1,4 @@
--- ADR-P1: SQLite backend via sqlx — initial schema.
+-- SQLite backend initial schema.
 -- STRICT (SQLite 3.37+) enforces column type rigor; no silent text-to-int coercion.
 
 CREATE TABLE observations (
@@ -51,7 +51,7 @@ CREATE TABLE suppression_rules (
 CREATE INDEX idx_supp_fingerprint ON suppression_rules (fingerprint, until);
 CREATE INDEX idx_supp_until       ON suppression_rules (until);
 
--- ADR-P3 §P3.2: Notification dispatch audit log.
+-- Notification dispatch audit log.
 -- One row per dispatch attempt. Rows are INSERTed at status=Pending and
 -- UPDATEd exactly once to a terminal status. V0 ships audit-only; the
 -- retry columns (attempt_number, parent_attempt_id, next_retry_at) are

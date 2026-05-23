@@ -1,4 +1,4 @@
-//! `SqliteNotificationAttemptRepository` per ADR-P3 §§P3.2, P3.3.
+//! SQLite-backed notification dispatch audit log.
 //!
 //! Rows move through the state machine in two writes: an INSERT at
 //! `status = Pending` followed by exactly one UPDATE to a terminal
