@@ -14,7 +14,9 @@ use thiserror::Error;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinSet;
 
+use crate::api::ApiDeps;
 use crate::collectors::traits::{PollingCollector, SubscriptionCollector};
+use crate::config::api::ApiConfig;
 use crate::config::runtime::RuntimeConfig;
 use crate::diagnostics::traits::DiagnosticRule;
 use crate::incidents::engine::IncidentEngine;
@@ -40,6 +42,8 @@ pub struct RuntimeDeps {
     pub incident_repo: Arc<dyn IncidentRepository>,
     pub attempts_repo: Arc<dyn NotificationAttemptRepository>,
     pub config: RuntimeConfig,
+    pub api_config: ApiConfig,
+    pub sidecar_version: &'static str,
 }
 
 #[derive(Debug, Error)]
@@ -154,6 +158,27 @@ pub async fn run(deps: RuntimeDeps) -> Result<(), RuntimeError> {
         });
     }
 
+    if deps.api_config.enabled {
+        let shutdown_rx = shutdown_tx.subscribe();
+        let api_deps = ApiDeps {
+            sidecar_id: deps.sidecar_id.clone(),
+            sidecar_version: deps.sidecar_version,
+            started_at: std::time::Instant::now(),
+            incident_repo: Arc::clone(&deps.incident_repo),
+            observation_store: Arc::clone(&deps.observation_store),
+            attempts_repo: Arc::clone(&deps.attempts_repo),
+        };
+        let bind = deps.api_config.bind;
+        tasks.spawn(async move {
+            if let Err(e) = crate::api::server::run(bind, api_deps, shutdown_rx).await {
+                tracing::error!(error = ?e, "api server exited with error");
+            }
+            "api"
+        });
+    } else {
+        tracing::info!("operator api disabled via [api].enabled = false");
+    }
+
     // ----- Wait for SIGINT / SIGTERM ---------------------------------
     wait_for_shutdown_signal().await;
     tracing::info!("shutdown signal received; broadcasting to tasks");
@@ -260,6 +285,14 @@ mod tests {
             incident_repo: Arc::new(MemoryIncidentRepository::new()),
             attempts_repo: Arc::new(MemoryNotificationAttemptRepository::new()),
             config: Cfg::default(),
+            // Tests don't bind a TCP port — keeps the runtime under
+            // test fast and avoids fighting with whatever else is on
+            // the box.
+            api_config: ApiConfig {
+                enabled: false,
+                ..ApiConfig::default()
+            },
+            sidecar_version: "test-0.0.0",
         }
     }
 

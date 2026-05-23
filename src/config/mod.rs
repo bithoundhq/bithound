@@ -7,6 +7,7 @@
 //! top-level `Config` aggregate, the error type, and the loader
 //! entry point.
 
+pub mod api;
 pub mod cli;
 pub mod collectors;
 pub mod incidents;
@@ -27,6 +28,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::shared::types::SidecarId;
+use api::ApiConfig;
 use cli::Cli;
 use collectors::CollectorDescriptorConfig;
 use incidents::IncidentsConfig;
@@ -50,6 +52,9 @@ pub struct Config {
 
     #[serde(default)]
     pub runtime: RuntimeConfig,
+
+    #[serde(default)]
+    pub api: ApiConfig,
 
     #[serde(default)]
     pub incidents: IncidentsConfig,
