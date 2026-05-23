@@ -7,10 +7,47 @@ All notable changes to this project are recorded here. Format follows
 The supervisor + consumer wiring landed in 0.0.3.0 — bithound now
 boots, supervises its collectors, drives the engine + notification
 worker, and shuts down cleanly on SIGINT/SIGTERM. The first three V0
-diagnostic rules (Phase 11) ship in 0.0.4.0; the next milestone toward
-a "real" 0.1.0.0 is end-to-end regtest verification + operator docs.
+diagnostic rules (Phase 11) ship in 0.0.4.0. 0.0.5.0 closes Phase 12:
+an end-to-end smoke test that drives the full pipeline through a
+mock bitcoind, plus a refreshed README and a new operator guide.
 
 ## [Unreleased]
+
+## [0.0.5.0] - 2026-05-22
+
+### Added
+- End-to-end integration test under `tests/e2e_tip_lag.rs` that
+  spawns the `bithound` binary as a child process, points it at a
+  hand-rolled JSON-RPC mock server returning the A1 firing pattern,
+  drives a mock webhook receiver, and asserts an `Opened
+  bitcoin.tip_lag_or_ibd_stalled` lifecycle event arrives within 30
+  seconds. `#[ignore]`-gated so `cargo test` in CI doesn't spin a
+  bithound subprocess on every run; opt in with `cargo test
+  --ignored --test e2e_tip_lag` or `BITHOUND_TEST_REGTEST=1 cargo
+  test --test e2e_tip_lag -- --ignored`.
+- `tests/README.md` documents the integration-test layout, how to
+  opt in, and the contract for adding new `tests/e2e_*.rs` scenarios.
+
+### Changed
+- `README.md` rewritten for V0: real Quick Start section that works
+  for a fresh user, the three diagnostic rules listed explicitly,
+  what V0 doesn't do called out separately, repo layout updated to
+  cover `tests/` and the operator guide.
+- `docs/INCIDENT_CATALOG.md` cross-references its V0-implemented
+  entries (A1, A2, A3) to the rule modules under
+  `src/diagnostics/rules/bitcoin/`, and adds a new "Implemented in
+  V0" overview at the top of the file. `bitcoin.rpc_unreachable` is
+  documented inline as an operability rule that doesn't map to a
+  catalog entry.
+
+### Added (docs)
+- New `docs/OPERATOR_GUIDE.md` covering install, `bithound.toml`
+  authoring, Bitcoin Core RPC setup (both `user_pass` and
+  `cookie_file` auth schemes), Telegram / Discord / generic-webhook
+  sinks with sample payloads, per-rule reference for the three V0
+  diagnostic rules with "what to do" sections, log + database file
+  locations, and a troubleshooting section keyed on `EX_CONFIG=78`
+  and the `notification_attempts` audit table.
 
 ## [0.0.4.0] - 2026-05-22
 
