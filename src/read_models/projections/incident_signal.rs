@@ -131,7 +131,7 @@ mod tests {
     ) -> Observation {
         let payload = IncidentSignalObservation {
             signal: SignalName(signal.into()),
-            incident_kind: IncidentKind(incident_kind.into()),
+            incident_kind: IncidentKind::parse(incident_kind).expect("valid test kind"),
             severity: SignalSeverity::Warning,
             status,
             confidence: Confidence::High,
@@ -252,10 +252,10 @@ mod tests {
 
         let tip_lag = p.active_signals_for_incident_kind(
             &btc("alice"),
-            &IncidentKind("bitcoin.tip_lag".into()),
+            &IncidentKind::parse("bitcoin.tip_lag").expect("valid test kind"),
         );
         assert_eq!(tip_lag.len(), 1);
-        assert_eq!(tip_lag[0].value.incident_kind.0, "bitcoin.tip_lag");
+        assert_eq!(tip_lag[0].value.incident_kind.as_str(), "bitcoin.tip_lag");
     }
 
     #[test]
@@ -271,7 +271,7 @@ mod tests {
         .unwrap();
         let tip_lag = p.active_signals_for_incident_kind(
             &btc("alice"),
-            &IncidentKind("bitcoin.tip_lag".into()),
+            &IncidentKind::parse("bitcoin.tip_lag").expect("valid test kind"),
         );
         assert!(tip_lag.is_empty());
     }

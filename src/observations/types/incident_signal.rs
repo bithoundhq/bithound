@@ -34,7 +34,7 @@ impl SignalName {
     /// signal names via this helper rather than reformatting the suffix
     /// by hand.
     pub fn for_incident_kind(kind: &crate::incidents::IncidentKind) -> Self {
-        SignalName(format!("{}.signal", kind.0))
+        SignalName(format!("{}.signal", kind.as_str()))
     }
 }
 

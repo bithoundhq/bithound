@@ -300,7 +300,7 @@ mod tests {
             ctx(alice.clone(), t0()),
             IncidentSignalObservation {
                 signal: SignalName("bitcoin.tip_lag.signal".into()),
-                incident_kind: IncidentKind("bitcoin.tip_lag".into()),
+                incident_kind: IncidentKind::parse("bitcoin.tip_lag").expect("valid test kind"),
                 severity: SignalSeverity::Warning,
                 status: SignalStatus::Active,
                 confidence: Confidence::High,
@@ -357,7 +357,7 @@ mod tests {
         let active_for_kind = IncidentSignalReadModel::active_signals_for_incident_kind(
             &store,
             &alice,
-            &IncidentKind("bitcoin.tip_lag".into()),
+            &IncidentKind::parse("bitcoin.tip_lag").expect("valid test kind"),
         );
         assert_eq!(active_for_kind.len(), 1);
 

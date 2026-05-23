@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use chrono::{DateTime, Utc};
 
+use crate::shared::parse::{parse_dotted_name, ParseDottedNameError};
 use crate::shared::types::{EntityRef, EvidenceRef, IncidentId, ObservationId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,17 +28,68 @@ pub struct Incident {
     pub evidence_summary: Vec<String>,
 }
 
+/// Canonical name for an incident kind (e.g. `bitcoin.tip_lag`).
+///
+/// Constructed only through [`IncidentKind::parse`] or
+/// [`IncidentKind::from_well_known`]; the inner field is private so
+/// callers can't bypass validation by wrapping arbitrary strings (per
+/// ADR-D2).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct IncidentKind(pub String);
+#[serde(try_from = "String", into = "String")]
+pub struct IncidentKind(String);
 
 impl IncidentKind {
+    /// Parse `s` against the shared dotted-name grammar.
+    pub fn parse(s: impl AsRef<str>) -> Result<Self, ParseDottedNameError> {
+        parse_dotted_name(s.as_ref()).map(Self)
+    }
+
+    /// Borrow the inner string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
     /// Lift a canonical name from [`crate::incidents::well_known`] into
     /// a typed `IncidentKind`. Rules use this to reference the kind
     /// they emit signals for without re-typing the string literal —
     /// drift between the constant and `default_kinds.toml` is caught
     /// by the parity test in `well_known`.
+    ///
+    /// Debug-asserts validity against the parse rule; release builds
+    /// skip the check because the parity tests in `well_known` and the
+    /// `[a-z][a-z0-9_]*` form of the constants make a malformed name
+    /// unable to reach `main`.
     pub fn from_well_known(name: &'static str) -> Self {
+        debug_assert!(
+            parse_dotted_name(name).is_ok(),
+            "invalid well_known incident kind: {name}"
+        );
         IncidentKind(name.to_string())
+    }
+}
+
+impl AsRef<str> for IncidentKind {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for IncidentKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl TryFrom<String> for IncidentKind {
+    type Error = ParseDottedNameError;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Self::parse(s)
+    }
+}
+
+impl From<IncidentKind> for String {
+    fn from(k: IncidentKind) -> String {
+        k.0
     }
 }
 
@@ -60,7 +112,13 @@ impl IncidentFingerprint {
     pub fn as_key(&self) -> String {
         let (subject_kind, subject_id) = subject_kind_and_id(&self.subject);
         let dim = self.dimension.as_deref().unwrap_or("-");
-        format!("{}|{}|{}|{}", subject_kind, subject_id, self.kind.0, dim)
+        format!(
+            "{}|{}|{}|{}",
+            subject_kind,
+            subject_id,
+            self.kind.as_str(),
+            dim
+        )
     }
 }
 
@@ -84,7 +142,7 @@ mod tests {
     fn fp_btc(kind: &str, dim: Option<&str>) -> IncidentFingerprint {
         IncidentFingerprint {
             subject: EntityRef::BitcoinNode(BitcoinNodeId("alice".into())),
-            kind: IncidentKind(kind.into()),
+            kind: IncidentKind::parse(kind).expect("valid test kind"),
             dimension: dim.map(|s| s.to_string()),
         }
     }
@@ -120,6 +178,53 @@ mod tests {
         let a = fp_btc("bitcoin.tip_lag", Some("x"));
         let b = fp_btc("bitcoin.tip_lag", Some("x"));
         assert_eq!(a.as_key(), b.as_key());
+    }
+
+    #[test]
+    fn parse_rejects_invalid_input() {
+        assert!(IncidentKind::parse("BadCase").is_err());
+        assert!(IncidentKind::parse("no_dot").is_err());
+        assert!(IncidentKind::parse("").is_err());
+    }
+
+    #[test]
+    fn parse_accepts_valid_input() {
+        let k = IncidentKind::parse("bitcoin.tip_lag").expect("valid");
+        assert_eq!(k.as_str(), "bitcoin.tip_lag");
+        assert_eq!(format!("{}", k), "bitcoin.tip_lag");
+        assert_eq!(<IncidentKind as AsRef<str>>::as_ref(&k), "bitcoin.tip_lag");
+    }
+
+    #[test]
+    fn from_well_known_constructs() {
+        let k = IncidentKind::from_well_known(crate::incidents::well_known::BITCOIN_NO_PEERS);
+        assert_eq!(k.as_str(), "bitcoin.no_peers");
+    }
+
+    #[test]
+    fn serde_round_trips_through_string() {
+        let k = IncidentKind::parse("bitcoin.tip_lag").expect("valid");
+        let json = serde_json::to_string(&k).expect("serialize");
+        assert_eq!(json, "\"bitcoin.tip_lag\"");
+        let back: IncidentKind = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, k);
+    }
+
+    #[test]
+    fn serde_revalidates_invalid_input() {
+        // An attacker-controlled JSON value with a malformed name must
+        // fail deserialization — the `try_from = "String"` attribute on
+        // `IncidentKind` is what makes this work; serde's default
+        // `Deserialize` would happily wrap the bad string.
+        let err = serde_json::from_str::<IncidentKind>("\"BadCase\"")
+            .expect_err("malformed name must not deserialize");
+        assert!(err.to_string().contains("invalid character"));
+    }
+
+    #[test]
+    fn try_from_string_validates() {
+        assert!(<IncidentKind as TryFrom<String>>::try_from("bitcoin.tip_lag".into()).is_ok());
+        assert!(<IncidentKind as TryFrom<String>>::try_from("BadCase".into()).is_err());
     }
 }
 

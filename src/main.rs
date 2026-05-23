@@ -251,16 +251,22 @@ fn build_notification_rules(
             }
         };
 
+        let mut event_kinds: Vec<IncidentKind> = Vec::with_capacity(cfg.event_kinds.len());
+        for k in &cfg.event_kinds {
+            event_kinds.push(IncidentKind::parse(k).map_err(|e| {
+                anyhow::anyhow!(
+                    "notification rule {id:?}: invalid event_kind {k:?}: {e}",
+                    id = cfg.id
+                )
+            })?);
+        }
+
         out.push(NotificationRule {
             id: NotificationRuleId(cfg.id.clone()),
             name: NotificationRuleName(cfg.name.clone()),
             enabled: cfg.enabled,
             min_severity: map_severity(&cfg.min_severity),
-            event_kinds: cfg
-                .event_kinds
-                .iter()
-                .map(|k| IncidentKind(k.clone()))
-                .collect(),
+            event_kinds,
             target,
         });
     }

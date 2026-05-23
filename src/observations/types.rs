@@ -400,7 +400,8 @@ mod tests {
 
     #[test]
     fn incident_signal_payload_roundtrips_via_serde() {
-        let kind = crate::incidents::IncidentKind("bitcoin.no_peers".into());
+        let kind =
+            crate::incidents::IncidentKind::parse("bitcoin.no_peers").expect("valid test kind");
         let signal = IncidentSignalObservation {
             signal: SignalName::for_incident_kind(&kind),
             incident_kind: kind,

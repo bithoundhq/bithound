@@ -34,7 +34,7 @@ mod tests {
     #[test]
     fn incident_event_serializes_to_json() {
         let ev = IncidentEvent::DraftBelowConfidenceFloor {
-            kind: IncidentKind("bitcoin.tip_lag".into()),
+            kind: IncidentKind::parse("bitcoin.tip_lag").expect("valid test kind"),
             confidence: Confidence::Low,
             floor: Confidence::Medium,
         };

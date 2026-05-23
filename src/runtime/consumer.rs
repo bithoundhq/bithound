@@ -382,7 +382,7 @@ fn compose_notification_message(
     let title = format!(
         "{verb} [{severity:?}] {kind}",
         severity = incident.severity,
-        kind = incident.kind.0,
+        kind = incident.kind.as_str(),
     );
     let summary = format!("incident {:?} on {:?}", incident.id, incident.subject);
 
@@ -594,7 +594,8 @@ mod tests {
             "always-tip-lag"
         }
         fn evaluate(&self, ctx: DiagnosticContext<'_>) -> anyhow::Result<Vec<IncidentSignalDraft>> {
-            let kind = crate::incidents::IncidentKind("bitcoin.tip_lag".into());
+            let kind =
+                crate::incidents::IncidentKind::parse("bitcoin.tip_lag").expect("valid test kind");
             Ok(vec![IncidentSignalDraft {
                 signal: SignalName::for_incident_kind(&kind),
                 kind,

@@ -51,7 +51,7 @@ mod tests {
     fn incident(status: IncidentStatus) -> Incident {
         let at = Utc.timestamp_nanos(1_700_000_000_000_000_000);
         let subject = EntityRef::BitcoinNode(BitcoinNodeId("a".into()));
-        let kind = IncidentKind("bitcoin.no_peers".into());
+        let kind = IncidentKind::parse("bitcoin.no_peers").expect("valid test kind");
         Incident {
             id: IncidentId::new(),
             fingerprint: IncidentFingerprint {

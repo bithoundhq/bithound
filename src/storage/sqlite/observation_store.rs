@@ -319,7 +319,7 @@ mod tests {
                 attrs(),
             ),
             {
-                let kind = IncidentKind("bitcoin.no_peers".into());
+                let kind = IncidentKind::parse("bitcoin.no_peers").expect("valid test kind");
                 Observation::incident_signal(
                     ctx(at),
                     IncidentSignalObservation {

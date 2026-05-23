@@ -151,7 +151,7 @@ mod tests {
 
     fn resolved_incident_at(at: chrono::DateTime<Utc>) -> Incident {
         let subject = EntityRef::BitcoinNode(BitcoinNodeId("a".into()));
-        let kind = IncidentKind("bitcoin.no_peers".into());
+        let kind = IncidentKind::parse("bitcoin.no_peers").expect("valid test kind");
         Incident {
             id: IncidentId::new(),
             fingerprint: IncidentFingerprint {
