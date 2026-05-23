@@ -1,14 +1,22 @@
 # Incident-kind schema
 
+This is the schema for `config/default_kinds.toml` and any
+operator-supplied custom catalog pointed at by
+`[incidents].kinds_config_path`. The built-in V0 catalog ships three
+entries — see
+[Operator → Incident catalog](../operator/incident-catalog.md) for
+the wired rules. Operators extend the registry through
+[Custom incidents](../operator/custom-incidents.md).
+
 ## TOML shape
 
 ```toml
 [[kinds]]
-name              = "namespace.event"             # required, unique
-allowed_subjects  = ["BitcoinNode", "Host"]       # required, non-empty
+name              = "bitcoin.no_peers"            # required, unique
+allowed_subjects  = ["BitcoinNode"]               # required, non-empty
 allows_dimension  = false                         # required
 dimension_label   = "mount_path"                  # optional, documentation
-min_open_confidence = "Medium"                    # optional, default Medium
+min_open_confidence = "High"                      # optional, default Medium
 ```
 
 | Field                 | Type            | Required | Notes                                                                                  |
