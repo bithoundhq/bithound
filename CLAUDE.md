@@ -136,10 +136,11 @@ their own tasks and feed a bounded `mpsc::channel<ObservationBatch>`.
 | `src/diagnostics/` | `DiagnosticRule` trait, `IncidentSignalDraft` | L2, R1 |
 | `src/incidents/` | `Incident`, `IncidentFingerprint`, `IncidentEngine` (designed) | L1–L5 |
 | `src/notifications/` | `Notifier` + Telegram/Discord/webhook target adapters | L5 |
-| `src/runtime/` | (Designed, not yet present) — supervisor + consumer | S1–S3 |
-| `src/storage/` | (Designed, not yet present) — sqlx-backed impls | P1, P2 |
-| `src/config/` | (Designed, not yet present) — TOML + `clap` CLI | X1 |
-| `migrations/` | (Designed, not yet present) — sqlx migration files | P1 |
+| `src/api/` | axum HTTP server, DTOs, handlers; the four V0 operator endpoints | A1 |
+| `src/runtime/` | Supervisor, consumer, notification worker, API task, bootstrap | S1–S3, N2 |
+| `src/storage/` | sqlx-backed observation store + incident + notification-attempt repos | P1, P2, P3 |
+| `src/config/` | TOML loader, `clap` CLI, env-var override, secret resolution | X1 |
+| `migrations/` | sqlx migration files (observations, incidents, suppression, notification_attempts) | P1, P3 |
 
 ### Key invariants that aren't obvious from the code
 

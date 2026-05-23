@@ -18,8 +18,9 @@ common ways operators get stuck.
 4. [Bitcoin Core RPC setup](#bitcoin-core-rpc-setup)
 5. [Notification sinks](#notification-sinks)
 6. [The three V0 diagnostic rules](#the-three-v0-diagnostic-rules)
-7. [Where logs and the database live](#where-logs-and-the-database-live)
-8. [Troubleshooting](#troubleshooting)
+7. [Operator HTTP API](#operator-http-api)
+8. [Where logs and the database live](#where-logs-and-the-database-live)
+9. [Troubleshooting](#troubleshooting)
 
 ## What V0 does and doesn't do
 
@@ -38,6 +39,10 @@ common ways operators get stuck.
   notification rules.
 - Persists an audit row for every notification attempt so a delivery
   failure leaves a forensic trail.
+- Serves a local read-only HTTP API on `127.0.0.1:8487` by default
+  (`GET /health`, `GET /incidents/open`, `GET /incidents/:id`,
+  `GET /incidents/:id/evidence`) so operators can inspect state with
+  `curl | jq` without waiting for a push notification.
 - Survives Bitcoin Core restarts, sidecar restarts, and SIGTERM —
   the sidecar's UUIDv7 identity is persisted in `id_file` and reused
   on every restart so observation provenance stays stable.
@@ -49,9 +54,9 @@ common ways operators get stuck.
   config migration, but no collectors are wired for those targets.
 - Subscribe to ZMQ. The `zmq_endpoint` field on `[[bitcoin_nodes]]`
   is parsed but not used; ZMQ subscription collectors land in V0.1.
-- Run a UI. The audit trail is queryable via `sqlite3` against the
-  configured `db_path`; a read-only HTTP API lands in the **A**
-  cluster (BTH-56, BTH-57).
+- Run a browser UI. The operator API speaks JSON over loopback HTTP;
+  pair it with `curl` and `jq`, or query the `db_path` SQLite file
+  directly. A browser UI is V0.2.
 - Implement suppression rules or maintenance windows. The
   `SuppressionRule` shape exists but the V0 notifier doesn't gate on
   it.
@@ -367,6 +372,52 @@ The fixes diverge — A1 is usually a `-maxtipage` restart or
 `reconsiderblock`; A2 is usually a peer churn.
 
 **Source:** [`src/diagnostics/rules/bitcoin/tip_lag_or_ibd_stalled.rs`](../src/diagnostics/rules/bitcoin/tip_lag_or_ibd_stalled.rs)
+
+## Operator HTTP API
+
+Bithound serves a local read-only HTTP API so you can ask "what is
+broken right now?" without waiting for a notification or shelling
+into `sqlite3`. By default it binds `127.0.0.1:8487`. The bind is
+loopback-only and there is **no authentication, no CORS, no TLS** —
+this is a V0 trade-off, not an oversight. Only local processes can
+reach the API; if you need remote access, run `bithound` behind a
+reverse proxy that adds those layers.
+
+Configurable via the `[api]` block:
+
+```toml
+[api]
+bind = "127.0.0.1:8487"   # optional, default 127.0.0.1:8487
+enabled = true             # optional, default true; set false to skip
+```
+
+The four endpoints, all `GET`, all JSON:
+
+| Endpoint | What it returns |
+| --- | --- |
+| `/health` | Sidecar liveness + DB reachability + uptime. 200 when reachable, 503 when DB unreachable (body shape identical either way). |
+| `/incidents/open` | Every incident with `status != Resolved`, newest first. Empty array when none. |
+| `/incidents/:id` | Full incident detail by UUID. 404 if unknown, 400 if `:id` is not a UUID. |
+| `/incidents/:id/evidence` | Dereferences the incident's `evidence` array into the full underlying observations. Observations that retention has swept are silently omitted. |
+
+Quick examples:
+
+```bash
+# Is the sidecar healthy?
+curl -s localhost:8487/health | jq .
+
+# What's broken right now?
+curl -s localhost:8487/incidents/open | jq '.incidents[] | {kind, severity, opened_at, summary}'
+
+# Drill into one incident
+ID=$(curl -s localhost:8487/incidents/open | jq -r '.incidents[0].id')
+curl -s localhost:8487/incidents/$ID | jq .
+curl -s localhost:8487/incidents/$ID/evidence | jq '.evidence[] | {observation_id, observed_at, payload}'
+```
+
+The `[api].enabled = false` setting skips the API task entirely —
+useful for embedded deployments and for tests that exercise the rest
+of the runtime without binding a port.
 
 ## Where logs and the database live
 

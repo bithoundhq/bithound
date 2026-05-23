@@ -99,6 +99,7 @@ integer, a bool stays bool.
 | `[sidecar]` | yes | Sidecar identity file + log level filter. |
 | `[storage]` | yes | SQLite database path + retention windows. |
 | `[runtime]` | no | Channel capacity, shutdown deadline. Defaults are V0-tuned. |
+| `[api]` | no | Operator HTTP API bind + enable flag. Defaults to loopback. |
 | `[incidents]` | no | Optional path to a user-supplied incident-kind catalog. |
 | `[[bitcoin_nodes]]` | no | One or more Bitcoin Core nodes to monitor (V0 only knows this kind). |
 | `[[lnd_nodes]]` | no | Reserved for V0.1; parsed but ignored. |
@@ -129,6 +130,43 @@ Two auth schemes are supported:
 
 Full walkthroughs in the
 [Operator guide](https://github.com/bithoundhq/bithound/blob/main/docs/OPERATOR_GUIDE.md#bitcoin-core-rpc-setup).
+
+## Operator HTTP API
+
+Bithound serves a local read-only HTTP API so you can inspect state
+without waiting for a notification. By default it binds
+`127.0.0.1:8487`. V0 ships with **no authentication, no CORS, no
+TLS** — the loopback bind is the safety mechanism.
+
+```toml
+[api]
+bind = "127.0.0.1:8487"   # optional, default 127.0.0.1:8487
+enabled = true             # optional, default true
+```
+
+The four endpoints, all `GET`, all JSON:
+
+- `/health` — sidecar liveness + DB reachability + uptime. 200 when
+  reachable, 503 when the DB probe fails. Same body shape either way.
+- `/incidents/open` — every incident with `status != Resolved`,
+  newest first. Empty array when none.
+- `/incidents/:id` — full incident detail by UUID. 404 on unknown id,
+  400 on a non-UUID path.
+- `/incidents/:id/evidence` — dereferences the incident's evidence
+  array into the full underlying observations. Observations swept by
+  retention are silently omitted.
+
+Quick taste:
+
+```bash
+curl -s localhost:8487/health | jq .
+curl -s localhost:8487/incidents/open | jq '.incidents[] | {kind, severity, summary}'
+```
+
+If you need remote access, run bithound behind a reverse proxy that
+adds auth + TLS. `[api].enabled = false` disables the API task
+entirely. The endpoint schemas are detailed in
+[Operator guide → Operator HTTP API](https://github.com/bithoundhq/bithound/blob/main/docs/OPERATOR_GUIDE.md#operator-http-api).
 
 ## Custom incidents
 

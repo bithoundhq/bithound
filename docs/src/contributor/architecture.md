@@ -31,7 +31,8 @@ collectors → ObservationBatch → observation store
                                                        Telegram / Discord / webhook
 ```
 
-Two task families separate the responsibilities (ADR-S1, ADR-N2):
+Three task families separate the responsibilities (ADR-S1, ADR-N2,
+ADR-A1):
 
 - The **consumer task** owns the read-model store and the engine. It
   never blocks on a notification sender, so a slow webhook can't
@@ -40,10 +41,16 @@ Two task families separate the responsibilities (ADR-S1, ADR-N2):
   dispatch messages off its own channel, flips
   `notification_attempt` rows from `Pending` to a terminal status,
   and never touches the read-model store.
+- The **operator API task** serves the local read-only HTTP surface
+  (`/health`, `/incidents/open`, `/incidents/:id`,
+  `/incidents/:id/evidence`). It holds `Arc<dyn ...>` repository
+  references and only reads — never mutates engine or read-model
+  state. The same broadcast shutdown channel cleanly drains its
+  in-flight requests on SIGTERM.
 
-Both run alongside the **supervisor task** (ADR-S2), which spawns
-one worker per collector with exponential-backoff respawn (10s →
-30s → 60s → 300s, resetting after a clean 5-minute run).
+All three run alongside the **supervisor task** (ADR-S2), which
+spawns one worker per collector with exponential-backoff respawn
+(10s → 30s → 60s → 300s, resetting after a clean 5-minute run).
 
 ## Module map
 
@@ -57,9 +64,10 @@ one worker per collector with exponential-backoff respawn (10s →
 | `src/diagnostics/` | `DiagnosticRule` trait, `DiagnosticContext`, `IncidentSignalDraft`; the three V0 rules under `rules/bitcoin/` |
 | `src/incidents/` | `Incident`, `IncidentFingerprint`, `IncidentEngine`, `KindRegistry`, well-known constants |
 | `src/notifications/` | `NotificationRule`, per-sink renderers and senders (Telegram, Discord, webhook) |
-| `src/runtime/` | `RuntimeDeps`, supervisor, consumer, notification worker, bootstrap helpers |
+| `src/api/` | axum HTTP server, DTOs, handlers, `ApiError`/`ServerError`; the four operator endpoints |
+| `src/runtime/` | `RuntimeDeps`, supervisor, consumer, notification worker, API task, bootstrap helpers |
 | `src/storage/` | `sqlx`-backed observation store and incident repository + memory test impls |
-| `src/config/` | TOML loader + `clap` CLI + env-var override + secret resolution |
+| `src/config/` | TOML loader + `clap` CLI + env-var override + secret resolution (`[api]` block included) |
 | `migrations/` | `sqlx` migration files |
 | `tests/` | End-to-end integration tests (`#[ignore]`-gated) |
 
@@ -121,4 +129,4 @@ The ADRs back the invariants above. Quick map:
 | Identity + sub-entity scoping | [N1](../adr/n1.md) |
 | Notification delivery worker (separate task) | [N2](../adr/n2.md) |
 | Single TOML config, env-var overrides for secrets | [X1](../adr/x1.md) |
-| Local read-only operator API (V0.1) | [A1](../adr/a1.md) |
+| Local read-only operator API (V0, four endpoints) | [A1](../adr/a1.md) |
