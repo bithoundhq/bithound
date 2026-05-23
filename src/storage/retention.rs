@@ -142,7 +142,7 @@ mod tests {
         };
         Observation::event(
             ctx,
-            "test",
+            crate::observations::EventName::parse("test.event").expect("valid"),
             EventSeverity::Info,
             None,
             Attributes(std::collections::BTreeMap::new()),

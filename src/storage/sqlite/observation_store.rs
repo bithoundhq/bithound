@@ -271,7 +271,7 @@ mod tests {
             ),
             Observation::event(
                 ctx(at),
-                "bitcoin.test",
+                EventName::parse("bitcoin.test").expect("valid"),
                 EventSeverity::Info,
                 Some("hello".into()),
                 attrs(),
@@ -288,14 +288,19 @@ mod tests {
             ),
             Observation::health(
                 ctx(at),
-                "rpc",
+                HealthTargetId::parse("test.rpc").expect("valid"),
                 HealthStatus::Ok,
                 Some(10),
                 None,
                 None,
                 attrs(),
             ),
-            Observation::inventory(ctx(at), "btc.peers", BTreeMap::new(), attrs()),
+            Observation::inventory(
+                ctx(at),
+                InventoryName::parse("btc.peers").expect("valid"),
+                BTreeMap::new(),
+                attrs(),
+            ),
             Observation::state(
                 ctx(at),
                 StateObservation::BitcoinBlockchain(BitcoinBlockchainState {
@@ -312,7 +317,7 @@ mod tests {
             ),
             Observation::transition(
                 ctx(at),
-                "ibd.complete",
+                TransitionName::parse("bitcoin.ibd.complete").expect("valid"),
                 StateAtom::String("in_ibd".into()),
                 StateAtom::String("synced".into()),
                 None,
@@ -336,7 +341,7 @@ mod tests {
             Observation::diagnosis(
                 ctx(at),
                 DiagnosisObservation {
-                    diagnosis: DiagnosisName("bitcoin.tip_lag.assessment".into()),
+                    diagnosis: DiagnosisName::parse("bitcoin.tip_lag.assessment").expect("valid"),
                     summary: "stuck".into(),
                     confidence: Confidence::Medium,
                     likely_causes: vec![],

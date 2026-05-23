@@ -263,7 +263,7 @@ mod tests {
         // Health
         let health_obs = Observation::health(
             ctx(alice.clone(), t0()),
-            "bitcoin.rpc",
+            HealthTargetId::parse("bitcoin.rpc").expect("valid"),
             HealthStatus::Ok,
             Some(12),
             None,
@@ -333,9 +333,12 @@ mod tests {
             _ => panic!(),
         }
 
-        let health =
-            HealthReadModel::current_health(&store, &alice, &HealthTargetId("bitcoin.rpc".into()))
-                .expect("health");
+        let health = HealthReadModel::current_health(
+            &store,
+            &alice,
+            &HealthTargetId::parse("bitcoin.rpc").expect("valid"),
+        )
+        .expect("health");
         assert_eq!(health.value.status, HealthStatus::Ok);
 
         let cap = CapabilityReadModel::current_capability(
@@ -405,7 +408,7 @@ mod tests {
         // Event payload — no projection cares.
         let event_obs = Observation::event(
             ctx(alice.clone(), t0()),
-            "ibd_started",
+            crate::observations::EventName::parse("bitcoin.ibd_started").expect("valid"),
             crate::observations::EventSeverity::Info,
             None,
             Attributes(BTreeMap::new()),
@@ -415,7 +418,7 @@ mod tests {
         // Transition payload — no projection cares.
         let transition_obs = Observation::transition(
             ctx(alice.clone(), t0()),
-            "ibd",
+            crate::observations::TransitionName::parse("bitcoin.ibd").expect("valid"),
             crate::observations::StateAtom::String("active".into()),
             crate::observations::StateAtom::String("done".into()),
             None,
@@ -426,7 +429,7 @@ mod tests {
         // Inventory payload — no projection cares.
         let inventory_obs = Observation::inventory(
             ctx(alice.clone(), t0()),
-            "facts",
+            crate::observations::InventoryName::parse("bitcoin.facts").expect("valid"),
             BTreeMap::new(),
             Attributes(BTreeMap::new()),
         );
@@ -434,7 +437,7 @@ mod tests {
 
         // Diagnosis payload — no projection cares.
         let diag = crate::observations::DiagnosisObservation {
-            diagnosis: crate::observations::DiagnosisName("x".into()),
+            diagnosis: crate::observations::DiagnosisName::parse("test.dummy").expect("valid"),
             summary: "y".into(),
             confidence: Confidence::Medium,
             likely_causes: vec![],
@@ -455,7 +458,7 @@ mod tests {
         assert!(HealthReadModel::current_health(
             &store,
             &btc("alice"),
-            &HealthTargetId("x".into())
+            &HealthTargetId::parse("test.missing").expect("valid")
         )
         .is_none());
         assert!(CapabilityReadModel::capabilities_for(&store, &btc("alice")).is_empty());

@@ -82,7 +82,7 @@ impl BitcoinRpcUnreachableRule {
         RPC_TARGETS.iter().all(|name| {
             matches!(
                 ctx.health
-                    .current_health(ctx.subject, &HealthTargetId((*name).into()))
+                    .current_health(ctx.subject, &HealthTargetId::from_well_known(name))
                     .map(|p| p.value.status),
                 Some(HealthStatus::Critical)
             )

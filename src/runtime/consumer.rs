@@ -450,7 +450,7 @@ mod tests {
         };
         let obs = Observation::transition(
             ctx,
-            "test.transition",
+            crate::observations::TransitionName::parse("test.transition").expect("valid"),
             StateAtom::String("a".into()),
             StateAtom::String("b".into()),
             None,

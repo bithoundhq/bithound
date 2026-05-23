@@ -35,7 +35,7 @@ impl FakeReadModels {
         status: HealthStatus,
         observed_at: DateTime<Utc>,
     ) {
-        let target_id = HealthTargetId(target.into());
+        let target_id = HealthTargetId::parse(target).expect("valid test health target");
         self.health.insert(
             (subject.clone(), target_id.clone()),
             Projected {
