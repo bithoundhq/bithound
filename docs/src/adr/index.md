@@ -77,3 +77,7 @@ letter; document its scope at the top of the first ADR in the cluster.
 ### A cluster — alerting & operator API
 
 - [ADR-A1 — Local operator HTTP API](a1.md)
+
+### E cluster — Lightning-domain modelling
+
+- [ADR-E1 — LND-domain state and kinds for V0.8](e1.md)
