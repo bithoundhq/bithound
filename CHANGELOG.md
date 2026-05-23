@@ -13,6 +13,43 @@ mock bitcoind, plus a refreshed README and a new operator guide.
 
 ## [Unreleased]
 
+## [0.0.5.1] - 2026-05-22
+
+### Changed
+- mdBook documentation refreshed against the shipped V0 surface
+  (11 pages, no source-file changes). The landing page, every
+  operator chapter, every contributor chapter, and every reference
+  chapter now reflect what V0 actually does instead of carrying
+  pre-runtime "stub" placeholders.
+  - **Operator pages.** `install.md` covers `cargo install`,
+    filesystem layout, a systemd unit sketch, and `--check-config`
+    verification. `configuration.md` covers the minimal config,
+    inline-secret guard, env-override syntax, and section-by-section
+    reference. `notifications.md` covers per-sink config shapes,
+    the actual JSON POST body that ships, per-rule filters, and the
+    `notification_attempts` audit table. `incident-catalog.md`
+    replaces the placeholder kind list with the three shipped V0
+    rules and links each one to its source file.
+  - **Contributor pages.** `overview.md` covers the V0 vs V0.1 scope
+    boundary and the source-of-truth reading order. `architecture.md`
+    updates the pipeline diagram to the `Vec<IncidentEvent>` shape
+    (ADR-D4), splits the consumer + notification-worker task
+    families, and includes the now-shipped `src/runtime/`,
+    `src/storage/`, `src/config/` modules in the module map. The
+    ADR cross-reference table maps each invariant to its ADR.
+    `workflow.md` documents the phase-bundle convention and the
+    version-prefixed PR-title rule.
+  - **Reference pages.** `config-schema.md` replaces the
+    speculative sketch with the actual TOML schema (every section,
+    required/optional/default markers, inline-secret rules, env
+    override). `observation-payloads.md` documents all ten payload
+    variants with V0 use-frequency, plus the eight state
+    sub-variants with their fields. `incident-kinds.md` refreshes
+    its example to a real V0 kind.
+
+The mdBook build (`mdbook build`) writes 42 HTML pages cleanly; no
+internal cross-link is broken.
+
 ## [0.0.5.0] - 2026-05-22
 
 ### Added
