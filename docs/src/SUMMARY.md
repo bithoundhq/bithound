@@ -53,3 +53,4 @@
 - [ADR-N2 — Notification delivery worker](adr/n2.md)
 - [ADR-A1 — Local operator HTTP API](adr/a1.md)
 - [ADR-E1 — LND-domain state and kinds for V0.8](adr/e1.md)
+- [ADR-E2 — LND polling collector patterns](adr/e2.md)

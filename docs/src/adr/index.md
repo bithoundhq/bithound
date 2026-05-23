@@ -81,3 +81,4 @@ letter; document its scope at the top of the first ADR in the cluster.
 ### E cluster — Lightning-domain modelling
 
 - [ADR-E1 — LND-domain state and kinds for V0.8](e1.md)
+- [ADR-E2 — LND polling collector patterns](e2.md)
