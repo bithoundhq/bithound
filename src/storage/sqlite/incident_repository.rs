@@ -7,7 +7,9 @@ use sqlx::Row;
 
 use crate::incidents::repository::{IncidentRepository, RepoError};
 use crate::incidents::{Incident, IncidentSeverity, IncidentStatus};
-use crate::shared::types::*;
+
+#[cfg(test)]
+use crate::shared::types::{BitcoinNodeId, EntityRef, IncidentId};
 
 pub struct SqliteIncidentRepository {
     pool: SqlitePool,
@@ -39,7 +41,8 @@ impl IncidentRepository for SqliteIncidentRepository {
     }
 
     async fn save(&self, incident: &Incident) -> Result<(), RepoError> {
-        let (subject_kind, subject_id) = subject_to_pair(&incident.subject);
+        let subject_kind = incident.subject.subject_kind_str();
+        let subject_id = incident.subject.subject_id_str();
         let incident_json = serde_json::to_string(incident)?;
         sqlx::query(
             "INSERT INTO incidents (\
@@ -94,18 +97,6 @@ fn status_str(s: &IncidentStatus) -> &'static str {
         IncidentStatus::Acknowledged => "Acknowledged",
         IncidentStatus::Resolved => "Resolved",
         IncidentStatus::Suppressed => "Suppressed",
-    }
-}
-
-fn subject_to_pair(subject: &EntityRef) -> (&'static str, &str) {
-    match subject {
-        EntityRef::Host(id) => ("host", id.0.as_str()),
-        EntityRef::BitcoinNode(id) => ("bitcoin_node", id.0.as_str()),
-        EntityRef::BitcoinPeer(id) => ("bitcoin_peer", id.0.as_str()),
-        EntityRef::LndNode(id) => ("lnd_node", id.0.as_str()),
-        EntityRef::LndPeer(id) => ("lnd_peer", id.0.as_str()),
-        EntityRef::LndChannel(id) => ("lnd_channel", id.0.as_str()),
-        EntityRef::LndInvoice(id) => ("lnd_invoice", id.0.as_str()),
     }
 }
 

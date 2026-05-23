@@ -109,28 +109,17 @@ impl IncidentFingerprint {
     /// Stable string form for storage indexing.
     ///
     /// Format: `"<subject_kind>|<subject_id>|<incident_kind>|<dimension or '-'>"`.
+    /// Scoped sub-entity subjects (per ADR-N1) render `subject_id` as
+    /// `<node_id>/<sub_id>` so cross-node collisions are impossible.
     pub fn as_key(&self) -> String {
-        let (subject_kind, subject_id) = subject_kind_and_id(&self.subject);
         let dim = self.dimension.as_deref().unwrap_or("-");
         format!(
             "{}|{}|{}|{}",
-            subject_kind,
-            subject_id,
+            self.subject.subject_kind_str(),
+            self.subject.subject_id_str(),
             self.kind.as_str(),
             dim
         )
-    }
-}
-
-fn subject_kind_and_id(subject: &EntityRef) -> (&'static str, &str) {
-    match subject {
-        EntityRef::Host(id) => ("host", id.0.as_str()),
-        EntityRef::BitcoinNode(id) => ("bitcoin_node", id.0.as_str()),
-        EntityRef::BitcoinPeer(id) => ("bitcoin_peer", id.0.as_str()),
-        EntityRef::LndNode(id) => ("lnd_node", id.0.as_str()),
-        EntityRef::LndPeer(id) => ("lnd_peer", id.0.as_str()),
-        EntityRef::LndChannel(id) => ("lnd_channel", id.0.as_str()),
-        EntityRef::LndInvoice(id) => ("lnd_invoice", id.0.as_str()),
     }
 }
 
@@ -178,6 +167,62 @@ mod tests {
         let a = fp_btc("bitcoin.tip_lag", Some("x"));
         let b = fp_btc("bitcoin.tip_lag", Some("x"));
         assert_eq!(a.as_key(), b.as_key());
+    }
+
+    #[test]
+    fn as_key_format_for_sidecar_subject() {
+        use crate::shared::types::SidecarId;
+        let id = uuid::Uuid::nil();
+        let fp = IncidentFingerprint {
+            subject: EntityRef::Sidecar(SidecarId(id)),
+            kind: IncidentKind::parse("sidecar.collector_failing").expect("valid"),
+            dimension: None,
+        };
+        assert_eq!(
+            fp.as_key(),
+            format!("sidecar|{id}|sidecar.collector_failing|-")
+        );
+    }
+
+    #[test]
+    fn as_key_format_for_scoped_lnd_channel() {
+        use crate::shared::types::{LndChannelId, LndNodeId};
+        let fp = IncidentFingerprint {
+            subject: EntityRef::LndChannel {
+                node_id: LndNodeId("ln-a".into()),
+                channel_id: LndChannelId("123:1:0".into()),
+            },
+            kind: IncidentKind::parse("lnd.channel_inactive").expect("valid"),
+            dimension: None,
+        };
+        assert_eq!(
+            fp.as_key(),
+            "lnd_channel|ln-a/123:1:0|lnd.channel_inactive|-"
+        );
+    }
+
+    /// The whole point of ADR-N1 §N1.2: the same channel ID under two
+    /// different nodes must produce two different keys.
+    #[test]
+    fn as_key_distinguishes_same_sub_id_under_different_parents() {
+        use crate::shared::types::{LndChannelId, LndNodeId};
+        let a = IncidentFingerprint {
+            subject: EntityRef::LndChannel {
+                node_id: LndNodeId("ln-a".into()),
+                channel_id: LndChannelId("123:1:0".into()),
+            },
+            kind: IncidentKind::parse("lnd.channel_inactive").expect("valid"),
+            dimension: None,
+        };
+        let b = IncidentFingerprint {
+            subject: EntityRef::LndChannel {
+                node_id: LndNodeId("ln-b".into()),
+                channel_id: LndChannelId("123:1:0".into()),
+            },
+            kind: IncidentKind::parse("lnd.channel_inactive").expect("valid"),
+            dimension: None,
+        };
+        assert_ne!(a.as_key(), b.as_key());
     }
 
     #[test]
