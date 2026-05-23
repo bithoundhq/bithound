@@ -17,3 +17,17 @@ pub enum ObservationOrigin {
     Imported,
     UserReported,
 }
+
+impl ObservationOrigin {
+    /// Stable wire-format string. Use this when rendering origins into
+    /// API responses, logs, or storage so the operator-facing value is
+    /// intentional, not coupled to Rust's `Debug` derive.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ObservationOrigin::Collected => "Collected",
+            ObservationOrigin::Computed => "Computed",
+            ObservationOrigin::Imported => "Imported",
+            ObservationOrigin::UserReported => "UserReported",
+        }
+    }
+}

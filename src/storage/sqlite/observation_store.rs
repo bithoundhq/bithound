@@ -94,6 +94,26 @@ impl ObservationStore for SqliteObservationStore {
         .into_stream();
         Ok(stream.boxed())
     }
+
+    async fn get_by_id(
+        &self,
+        id: &crate::shared::types::ObservationId,
+    ) -> Result<Option<Observation>, StoreError> {
+        let row = sqlx::query(
+            "SELECT id, observed_at, received_at, subject_kind, subject_id, \
+                    sidecar_id, collector_id, integration, instance_label, \
+                    origin, payload_json, attributes_json \
+             FROM observations \
+             WHERE id = ?",
+        )
+        .bind(id.0)
+        .fetch_optional(&self.pool)
+        .await?;
+        match row {
+            Some(row) => Ok(Some(row_to_observation(&row)?)),
+            None => Ok(None),
+        }
+    }
 }
 
 fn observed_to_nanos(t: DateTime<Utc>) -> i64 {

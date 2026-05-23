@@ -5,13 +5,13 @@ use chrono::{DateTime, Utc};
 use futures::stream::BoxStream;
 
 use crate::observations::Observation;
+use crate::shared::types::ObservationId;
 
 /// Append-only store for [`Observation`] facts.
 ///
-/// Per ADR-P2 §P2.1: V0 ships the full surface (append + iter). The trait is
-/// kept minimal — single mutation method (`append_many`) plus a streaming
-/// read (`iter_since`) used by V0.1+ read-model replay (ADR-R3 §R3.5 /
-/// ADR-S3 §S3.7).
+/// V0 ships the full surface: `append_many` for the write path, plus
+/// two read paths — `iter_since` for read-model replay and `get_by_id`
+/// for the operator API's evidence lookup.
 ///
 /// Concrete impls (`SqliteObservationStore`, `MemoryObservationStore`) live
 /// under `storage::sqlite` and `storage::memory`.
@@ -25,6 +25,12 @@ pub trait ObservationStore: Send + Sync {
         &self,
         since: DateTime<Utc>,
     ) -> Result<BoxStream<'_, Result<Observation, StoreError>>, StoreError>;
+
+    /// Fetch a single observation by id, or `None` if the row was
+    /// swept by retention (or never existed). Used by the operator
+    /// API's `/incidents/:id/evidence` endpoint to dereference an
+    /// incident's evidence array into full observations.
+    async fn get_by_id(&self, id: &ObservationId) -> Result<Option<Observation>, StoreError>;
 
     /// Single-observation convenience that delegates to [`Self::append_many`].
     async fn append(&self, obs: &Observation) -> Result<(), StoreError> {

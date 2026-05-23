@@ -17,6 +17,7 @@ A copyable annotated example with every supported field is
 | `[sidecar]` | yes | `SidecarConfig` |
 | `[storage]` | yes | `StorageConfig` |
 | `[runtime]` | no (defaults) | `RuntimeConfig` |
+| `[api]` | no (defaults) | `ApiConfig` |
 | `[incidents]` | no | `IncidentsConfig` |
 | `[[bitcoin_nodes]]` | no | `Vec<BitcoinNodeConfig>` |
 | `[[lnd_nodes]]` | no (reserved) | `Vec<LndNodeConfig>` |
@@ -64,6 +65,22 @@ shutdown_deadline_seconds = 30         # optional, default 30
 between collectors and the consumer task. `shutdown_deadline_seconds`
 is the maximum time the supervisor waits for in-flight work on a
 SIGTERM before force-aborting.
+
+## `[api]`
+
+```toml
+[api]
+bind = "127.0.0.1:8487"     # optional, default 127.0.0.1:8487
+enabled = true               # optional, default true
+```
+
+Local read-only HTTP API for operator queries. `bind` accepts any
+valid `SocketAddr` string; the default is loopback-only because V0
+ships with no authentication, no CORS, and no TLS. Setting
+`enabled = false` skips the API task entirely. The four V0 endpoints
+(`GET /health`, `GET /incidents/open`, `GET /incidents/:id`,
+`GET /incidents/:id/evidence`) are described in
+[Operator guide → HTTP API](../operator/configuration.md#operator-http-api).
 
 ## `[incidents]`
 

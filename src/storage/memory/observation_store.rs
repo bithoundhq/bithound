@@ -6,6 +6,7 @@ use futures::stream::{self, BoxStream, StreamExt};
 use tokio::sync::Mutex;
 
 use crate::observations::Observation;
+use crate::shared::types::ObservationId;
 use crate::storage::traits::{ObservationStore, StoreError};
 
 #[derive(Default)]
@@ -39,6 +40,11 @@ impl ObservationStore for MemoryObservationStore {
             .collect();
         snapshot.sort_by_key(|o| o.observed_at);
         Ok(stream::iter(snapshot.into_iter().map(Ok)).boxed())
+    }
+
+    async fn get_by_id(&self, id: &ObservationId) -> Result<Option<Observation>, StoreError> {
+        let guard = self.inner.lock().await;
+        Ok(guard.iter().find(|o| &o.id == id).cloned())
     }
 }
 

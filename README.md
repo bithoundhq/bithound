@@ -70,8 +70,16 @@ BITHOUND_OPS_WEBHOOK="https://hooks.your-incident-bus.example/incoming" \
 ```
 
 You should see one `bithound runtime starting` line on stderr,
-followed by per-collector load lines. If you see an `EX_CONFIG=78`
-exit, read the error message — it names the offending key.
+followed by per-collector load lines and `operator api listening on
+127.0.0.1:8487`. If you see an `EX_CONFIG=78` exit, read the error
+message — it names the offending key.
+
+Once it's running, the operator API answers on loopback:
+
+```bash
+curl -s localhost:8487/health | jq .
+curl -s localhost:8487/incidents/open | jq .
+```
 
 The [full example config](examples/bithound.example.toml) covers
 every supported field. The [Operator Guide](docs/OPERATOR_GUIDE.md)
@@ -98,14 +106,19 @@ setup and notification-sink credentials.
 - **Local-first storage** — SQLite via `sqlx` for observations,
   incidents, and notification attempts. Built for a single binary,
   cloud-portable to Postgres later.
+- **Operator HTTP API** — loopback-only read-only API on
+  `127.0.0.1:8487` by default. Four endpoints: `GET /health`,
+  `GET /incidents/open`, `GET /incidents/:id`,
+  `GET /incidents/:id/evidence`. No auth, no CORS, no TLS — the
+  loopback bind is the safety mechanism.
 
 ## What V0 doesn't do
 
 - Monitor LND or Elements (config schema accepts those blocks so
   V0.1 can land without migration; no collectors are wired yet).
 - Subscribe to ZMQ (the `zmq_endpoint` field is parsed but ignored).
-- Expose a UI (read-only HTTP API lands in the **A** cluster
-  tickets — BTH-56, BTH-57).
+- Expose a UI. The operator API is read-only JSON over loopback HTTP;
+  a browser UI is V0.2.
 - Implement suppression rules or maintenance windows (designed,
   not yet wired).
 - Auto-update or auto-restart on crash (use systemd / a process

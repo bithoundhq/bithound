@@ -20,6 +20,13 @@ vacuum_interval_hours     = 24
 channel_capacity = 1024
 shutdown_deadline_seconds = 30
 
+# Local read-only HTTP API for operator queries. Loopback-only by
+# default; V0 ships no auth, no CORS, no TLS — the loopback bind is
+# the safety mechanism. Set `enabled = false` to skip the API task.
+[api]
+bind = "127.0.0.1:8487"
+enabled = true
+
 [incidents]
 kinds_config_path = "/etc/bithound/custom_kinds.toml"
 

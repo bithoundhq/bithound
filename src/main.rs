@@ -4,6 +4,7 @@
 // expected for the current phase.
 #![allow(dead_code)]
 
+mod api;
 mod collectors;
 mod config;
 mod diagnostics;
@@ -179,6 +180,8 @@ async fn boot_runtime(loaded: LoadedConfig) -> anyhow::Result<()> {
         incident_repo,
         attempts_repo,
         config: config.runtime,
+        api_config: config.api,
+        sidecar_version: env!("CARGO_PKG_VERSION"),
     };
 
     runtime::run(deps).await?;

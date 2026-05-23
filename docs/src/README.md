@@ -43,6 +43,10 @@ Discord, and generic webhook sinks.
   row so a delivery failure is forensic.
 - Persists observations, incidents, and notification attempts to a
   local SQLite database with a configurable retention window.
+- Serves an operator HTTP API on `127.0.0.1:8487` by default. Four
+  read-only endpoints: `GET /health`, `GET /incidents/open`,
+  `GET /incidents/:id`, `GET /incidents/:id/evidence`. Loopback bind
+  is the safety mechanism; no auth, no CORS, no TLS in V0.
 
 ## What V0 doesn't do
 
@@ -50,8 +54,8 @@ Discord, and generic webhook sinks.
   V0.1 can land without migration; no collectors are wired yet.
 - Subscribe to ZMQ. The `zmq_endpoint` config field is parsed but
   ignored; ZMQ collectors land in V0.1.
-- Expose a UI. A read-only HTTP API lands in the A-cluster tickets
-  ([BTH-56](https://github.com/bithoundhq/bithound/issues), BTH-57).
+- Expose a browser UI. The operator API speaks JSON over loopback
+  HTTP; a UI is V0.2.
 - Implement suppression rules or maintenance windows. The shapes
   exist; the runtime doesn't gate on them yet.
 - Auto-update or auto-recover. Use a process supervisor (`systemd`,

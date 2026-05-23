@@ -12,13 +12,18 @@ use crate::shared::types::IncidentId;
 pub trait IncidentRepository: Send + Sync {
     /// Load every incident whose status is not `Resolved`.
     ///
-    /// Used at startup by the runtime (per ADR-S2) to hydrate the engine's
+    /// Used at startup by the runtime to hydrate the engine's
     /// open-incident map.
     async fn load_open(&self) -> Result<Vec<Incident>, RepoError>;
 
     /// Upsert the incident — INSERT on new id, UPDATE on existing id, all
     /// columns replaced atomically.
     async fn save(&self, incident: &Incident) -> Result<(), RepoError>;
+
+    /// Fetch a single incident by id, regardless of status. Returns
+    /// `None` if no row matches (either it never existed or retention
+    /// swept it). Used by the operator API's `/incidents/:id` endpoint.
+    async fn get(&self, id: &IncidentId) -> Result<Option<Incident>, RepoError>;
 }
 
 #[derive(Debug, thiserror::Error)]

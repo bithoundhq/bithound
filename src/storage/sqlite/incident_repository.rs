@@ -76,6 +76,24 @@ impl IncidentRepository for SqliteIncidentRepository {
         .await?;
         Ok(())
     }
+
+    async fn get(
+        &self,
+        id: &crate::shared::types::IncidentId,
+    ) -> Result<Option<Incident>, RepoError> {
+        let row = sqlx::query("SELECT incident_json FROM incidents WHERE id = ?")
+            .bind(id.0)
+            .fetch_optional(&self.pool)
+            .await?;
+        match row {
+            Some(row) => {
+                let json: String = row.try_get("incident_json")?;
+                let incident: Incident = serde_json::from_str(&json)?;
+                Ok(Some(incident))
+            }
+            None => Ok(None),
+        }
+    }
 }
 
 fn nanos(t: DateTime<Utc>) -> i64 {

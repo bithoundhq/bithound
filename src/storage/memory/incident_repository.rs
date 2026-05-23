@@ -37,6 +37,11 @@ impl IncidentRepository for MemoryIncidentRepository {
         guard.insert(incident.id.clone(), incident.clone());
         Ok(())
     }
+
+    async fn get(&self, id: &IncidentId) -> Result<Option<Incident>, RepoError> {
+        let guard = self.inner.lock().await;
+        Ok(guard.get(id).cloned())
+    }
 }
 
 #[cfg(test)]

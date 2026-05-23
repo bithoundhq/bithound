@@ -13,6 +13,63 @@ mock bitcoind, plus a refreshed README and a new operator guide.
 
 ## [Unreleased]
 
+## [0.0.7.0] - 2026-05-23
+
+### Added
+
+Phase A — local operator HTTP API. Closes the V0 operator loop:
+without it, "operator knows what's wrong" depends entirely on push
+notifications. Two tickets, both shipped:
+
+- **BTH-56: axum HTTP server bootstrap.** New `[api]` config block
+  (defaults: `bind = "127.0.0.1:8487"`, `enabled = true`) and a third
+  tokio task spawned by `runtime::run` alongside the consumer and
+  notification worker. Graceful shutdown rides the existing broadcast
+  channel. Loopback default is the safety mechanism — V0 has no auth,
+  no CORS, no TLS.
+- **BTH-57: V0 operator endpoints.** Four read-only routes:
+
+  - `GET /health` — sidecar liveness + DB connectivity probe.
+  - `GET /incidents/open` — incidents with `status != Resolved`,
+    newest first.
+  - `GET /incidents/:id` — full detail, 404 on unknown id, 400 on
+    non-UUID input.
+  - `GET /incidents/:id/evidence` — dereferenced evidence
+    observations. Rows swept by retention are silently omitted from
+    the response.
+
+  Wire DTOs live in `src/api/dto.rs` separate from the domain types
+  so the wire format can evolve cautiously. `SubjectDto` renders both
+  `node_id` and the sub-id for scoped `EntityRef` variants so
+  operators can distinguish `lnd-a/chan-1` from `lnd-b/chan-1`.
+
+Both `IncidentRepository` and `ObservationStore` gain a `get_by_id`
+method so the API can answer single-row reads through the primary-key
+index instead of iterating; SQLite and in-memory impls both
+implemented.
+
+### Fixed
+
+Pre-landing review found four small issues; all fixed in the same
+version:
+
+- `/health.uptime_seconds` reports time since sidecar start, not time
+  since the API task started. Was off by however long the consumer +
+  notification worker took to spin up; operators monitoring "is the
+  sidecar fresh after a restart?" now get the right number.
+- API 500 responses and the corresponding `tracing::error!` log now
+  include the underlying storage error message. The `ApiError`
+  display strings previously dropped the `RepoError` / `StoreError`
+  detail, leaving operators staring at "storage error: storage error"
+  in their logs.
+- `/incidents/:id/evidence` `origin` field uses a stable enum→string
+  mapping on `ObservationOrigin` instead of `format!("{:?}", ...)`.
+  A future variant rename can't silently change the API.
+- `tower` moved to `[dev-dependencies]` — it was a build-time only
+  helper for the integration tests.
+
+304 tests pass (was 286 before Phase A).
+
 ## [0.0.6.1] - 2026-05-23
 
 ### Changed
