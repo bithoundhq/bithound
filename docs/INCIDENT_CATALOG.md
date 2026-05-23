@@ -16,11 +16,39 @@ into a detector + diagnosis + suggested action.
   require different responses.
 - **Source(s).** Where this incident is documented in the wild.
 
+## Implemented in V0
+
+V0 ships three Bitcoin-Core-focused rules. Each is linked inline at
+its catalog entry below:
+
+| Catalog entry | Rule kind | Module |
+|---|---|---|
+| A1 + A2 (tip lag / IBD stall) | `bitcoin.tip_lag_or_ibd_stalled` | [`src/diagnostics/rules/bitcoin/tip_lag_or_ibd_stalled.rs`](../src/diagnostics/rules/bitcoin/tip_lag_or_ibd_stalled.rs) |
+| A3 (outbound peer starvation, V0 narrows to zero outbound) | `bitcoin.no_peers` | [`src/diagnostics/rules/bitcoin/no_peers.rs`](../src/diagnostics/rules/bitcoin/no_peers.rs) |
+| Operability: all four RPC health-check targets failing | `bitcoin.rpc_unreachable` | [`src/diagnostics/rules/bitcoin/rpc_unreachable.rs`](../src/diagnostics/rules/bitcoin/rpc_unreachable.rs) |
+
+`bitcoin.rpc_unreachable` doesn't map to an A-* / X-* entry because
+it's an operability signal (the sidecar can't reach the node), not a
+node-state pathology. It opens at Critical confidence High when all
+four RPCs the collector polls — `getblockchaininfo`, `getmempoolinfo`,
+`getnetworkinfo`, `getpeerinfo` — report `HealthStatus::Critical`
+continuously for ≥ 60 seconds, and clears when any one of them
+recovers.
+
+The remaining catalog entries (A4–A8, B1–B6, C1–C3, X1, X2) are
+designed but not yet rule-backed; they land in V0.1+.
+
 ---
 
 ## Category A: Bitcoin Core (bitcoind)
 
 ### A1. Tip lag — node believes it is in IBD when it shouldn't be
+
+> **Implemented in V0 by** `BitcoinTipLagOrIbdStalledRule` —
+> [`src/diagnostics/rules/bitcoin/tip_lag_or_ibd_stalled.rs`](../src/diagnostics/rules/bitcoin/tip_lag_or_ibd_stalled.rs).
+> Combines A1 + A2 into a single kind `bitcoin.tip_lag_or_ibd_stalled` so
+> the operator's response ("check the node") matches the alert
+> regardless of which pattern fires.
 
 **Symptom.** `getblockchaininfo.initialblockdownload == true` even though tip is
 recent. Node refuses to serve blocks; LND/Elements peg-ins stall. Wallet
@@ -52,6 +80,13 @@ issue `reconsiderblock` on the current tip. Long-term: track upstream issue.
 
 ### A2. IBD stall — block download window starvation
 
+> **Implemented in V0 by** `BitcoinTipLagOrIbdStalledRule` —
+> [`src/diagnostics/rules/bitcoin/tip_lag_or_ibd_stalled.rs`](../src/diagnostics/rules/bitcoin/tip_lag_or_ibd_stalled.rs).
+> The rule treats A1 and A2 as one operational alert. A2's pattern
+> ("`verification_progress` flat over a multi-minute window AND
+> `headers - blocks ≥ 1000`") is checked against a monotonic 5-minute
+> window tracked per subject.
+
 **Symptom.** Sync progresses, then halts at a specific height for minutes.
 Resumes only after a peer is disconnected and replaced. Repeats throughout IBD.
 
@@ -81,6 +116,13 @@ bottleneck. Mostly self-resolves.
 ---
 
 ### A3. Outbound peer starvation
+
+> **Implemented in V0 by** `BitcoinNoPeersRule` —
+> [`src/diagnostics/rules/bitcoin/no_peers.rs`](../src/diagnostics/rules/bitcoin/no_peers.rs).
+> V0 narrows the catalog's "< 8 outbound" threshold to the
+> unambiguous zero case (`connections_out == 0 AND networkactive ==
+> true`) and opens at Critical rather than Warning. The wider "low but
+> nonzero" band lands in V0.1.
 
 **Symptom.** Peer count is low (e.g. 1-2 outbound) for a sustained period. Node
 is at risk of being eclipsed — accepting a malicious view of the chain.
