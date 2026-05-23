@@ -7,6 +7,7 @@
 mod collectors;
 mod config;
 mod diagnostics;
+mod domain_events;
 mod incidents;
 mod notifications;
 mod observations;

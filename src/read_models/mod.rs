@@ -1,3 +1,4 @@
+pub mod events;
 pub mod projections;
 pub mod store;
 mod traits;

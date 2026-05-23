@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     incidents::{Incident, IncidentKind, IncidentLifecycleEvent},
@@ -10,10 +10,11 @@ use crate::{
 /// `SignalRecorded` → `IncidentTouched` → `Lifecycle`; terminal-or-no-op
 /// outcomes (e.g. `DraftBelowConfidenceFloor`) may appear anywhere.
 ///
-/// `Serialize` but not `Deserialize`: events are produced by the engine
-/// and consumed downstream; replay from storage must come back through
-/// the command surface so it re-validates against the current registry.
-#[derive(Debug, Clone, Serialize)]
+/// Both `Serialize` and `Deserialize` per ADR-D4 § "cloud-sync-ready".
+/// Re-deserializing an event does *not* replay it through the engine —
+/// any replay must come back through the command surface so it
+/// re-validates against the current registry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IncidentEvent {
     SignalRecorded(Observation),
     IncidentTouched(Incident),
