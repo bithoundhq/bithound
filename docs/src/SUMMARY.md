@@ -37,6 +37,7 @@
 - [ADR-C1 — Two collector traits](adr/c1.md)
 - [ADR-C2 — Polling output is ObservationBatch directly](adr/c2.md)
 - [ADR-C3 — Collector small calls](adr/c3.md)
+- [ADR-C4 — ZMQ subscription collector (Deferred to v1.0)](adr/c4.md)
 - [ADR-S1 — Per-collector tasks + central consumer](adr/s1.md)
 - [ADR-S2 — Per-batch rule evaluation](adr/s2.md)
 - [ADR-S3 — Runtime small calls](adr/s3.md)
@@ -51,3 +52,5 @@
 - [ADR-N1 — Identity refinements](adr/n1.md)
 - [ADR-N2 — Notification delivery worker](adr/n2.md)
 - [ADR-A1 — Local operator HTTP API](adr/a1.md)
+- [ADR-E1 — LND-domain state and kinds for V0.8](adr/e1.md)
+- [ADR-E2 — LND polling collector patterns](adr/e2.md)

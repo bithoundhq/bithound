@@ -44,6 +44,7 @@ letter; document its scope at the top of the first ADR in the cluster.
 - [ADR-C1 — Two collector traits](c1.md)
 - [ADR-C2 — Polling output is `ObservationBatch` directly](c2.md)
 - [ADR-C3 — Collector small calls](c3.md)
+- [ADR-C4 — ZMQ subscription collector (Deferred to v1.0)](c4.md)
 
 ### S cluster — runtime supervision
 
@@ -76,3 +77,8 @@ letter; document its scope at the top of the first ADR in the cluster.
 ### A cluster — alerting & operator API
 
 - [ADR-A1 — Local operator HTTP API](a1.md)
+
+### E cluster — Lightning-domain modelling
+
+- [ADR-E1 — LND-domain state and kinds for V0.8](e1.md)
+- [ADR-E2 — LND polling collector patterns](e2.md)
