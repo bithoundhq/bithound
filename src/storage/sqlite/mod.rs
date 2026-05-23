@@ -1,6 +1,7 @@
 //! SQLite backend per ADR-P1.
 
 pub mod incident_repository;
+pub mod notification_attempt_repository;
 pub mod observation_store;
 
 use std::path::Path;
@@ -63,6 +64,7 @@ mod tests {
             tables,
             vec![
                 "incidents".to_string(),
+                "notification_attempts".to_string(),
                 "observations".to_string(),
                 "suppression_rules".to_string(),
             ]
@@ -82,6 +84,7 @@ mod tests {
         assert!(tables.contains(&"observations".to_string()));
         assert!(tables.contains(&"incidents".to_string()));
         assert!(tables.contains(&"suppression_rules".to_string()));
+        assert!(tables.contains(&"notification_attempts".to_string()));
     }
 
     #[tokio::test]

@@ -13,6 +13,29 @@ mock bitcoind, plus a refreshed README and a new operator guide.
 
 ## [Unreleased]
 
+## [0.0.6.1] - 2026-05-23
+
+### Changed
+
+- **BTH-52: `SqliteNotificationAttemptRepository`.** Amends
+  `migrations/0001_initial.sql` with the `notification_attempts`
+  table (per ADR-P3 §P3.2 — every column, all four indexes,
+  `STRICT`) and adds the SQLite-backed repo at
+  `src/storage/sqlite/notification_attempt_repository.rs`. The
+  runtime now persists every notification dispatch attempt: each row
+  carries the target kind, redacted target summary, lifecycle kind,
+  attempt number, and the full `DeliveryOutcome` JSON for audit.
+  Secrets are never written — `target_summary` is the only target
+  column. Test coverage round-trips every `DeliveryOutcome` variant
+  (including `ExternalMessageRef::{Telegram, Discord}`) and verifies
+  via `EXPLAIN QUERY PLAN` that `list_retryable` hits
+  `idx_attempts_status_next_retry` rather than scanning. `main.rs`
+  switches the runtime wiring from the in-memory repo to the SQLite
+  repo so audit rows now survive a restart.
+- **BTH-54 retroactive bump.** BTH-54 (Identity refinements —
+  `EntityRef::Sidecar` + sub-entity scoping) merged before this
+  bump; this VERSION change captures both BTH-52 and BTH-54.
+
 ## [0.0.6.0] - 2026-05-23
 
 ### Changed

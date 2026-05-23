@@ -51,8 +51,8 @@ use crate::read_models::store::{ReadModelStore, ReadModelStoreConfig};
 use crate::runtime::bootstrap;
 use crate::runtime::notification_worker::NotifierSenders;
 use crate::shared::types::CollectorId;
-use crate::storage::memory::notification_attempt_repository::MemoryNotificationAttemptRepository;
 use crate::storage::sqlite::incident_repository::SqliteIncidentRepository;
+use crate::storage::sqlite::notification_attempt_repository::SqliteNotificationAttemptRepository;
 use crate::storage::sqlite::observation_store::SqliteObservationStore;
 use crate::storage::traits::ObservationStore;
 
@@ -132,12 +132,8 @@ async fn boot_runtime(loaded: LoadedConfig) -> anyhow::Result<()> {
         Arc::new(SqliteObservationStore::new(pool.clone()));
     let incident_repo: Arc<dyn IncidentRepository> =
         Arc::new(SqliteIncidentRepository::new(pool.clone()));
-    // BTH-52 will land a SqliteNotificationAttemptRepository; until
-    // then the runtime uses the memory impl so audit rows don't
-    // survive a restart. The trait surface is identical, so the
-    // swap is a one-line change here.
     let attempts_repo: Arc<dyn NotificationAttemptRepository> =
-        Arc::new(MemoryNotificationAttemptRepository::new());
+        Arc::new(SqliteNotificationAttemptRepository::new(pool.clone()));
 
     let read_models = ReadModelStore::new(ReadModelStoreConfig::default());
     let kinds = KindRegistry::load(config.incidents.kinds_config_path.as_deref())?;
