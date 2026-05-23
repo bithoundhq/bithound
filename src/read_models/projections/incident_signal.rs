@@ -130,7 +130,7 @@ mod tests {
         observed_at: chrono::DateTime<Utc>,
     ) -> Observation {
         let payload = IncidentSignalObservation {
-            signal: SignalName(signal.into()),
+            signal: SignalName::parse(signal).expect("valid test signal name"),
             incident_kind: IncidentKind::parse(incident_kind).expect("valid test kind"),
             severity: SignalSeverity::Warning,
             status,
@@ -152,7 +152,10 @@ mod tests {
     fn default_is_empty() {
         let p = IncidentSignalProjection::default();
         assert!(p
-            .current_signal(&btc("alice"), &SignalName("x".into()))
+            .current_signal(
+                &btc("alice"),
+                &SignalName::parse("test.missing").expect("valid"),
+            )
             .is_none());
     }
 
@@ -176,7 +179,10 @@ mod tests {
         p.apply(&a).unwrap();
         p.apply(&b).unwrap();
         let cur = p
-            .current_signal(&btc("alice"), &SignalName("bitcoin.tip_lag.signal".into()))
+            .current_signal(
+                &btc("alice"),
+                &SignalName::parse("bitcoin.tip_lag.signal").expect("valid"),
+            )
             .unwrap();
         assert_eq!(cur.value.status, SignalStatus::Cleared);
     }
@@ -203,7 +209,7 @@ mod tests {
 
         let active = p.active_signals_for(&btc("alice"));
         assert_eq!(active.len(), 1);
-        assert_eq!(active[0].value.signal.0, "bitcoin.tip_lag.signal");
+        assert_eq!(active[0].value.signal.as_str(), "bitcoin.tip_lag.signal");
     }
 
     #[test]
@@ -296,7 +302,10 @@ mod tests {
         p.apply(&newer).unwrap();
         p.apply(&older).unwrap();
         let cur = p
-            .current_signal(&btc("alice"), &SignalName("bitcoin.tip_lag.signal".into()))
+            .current_signal(
+                &btc("alice"),
+                &SignalName::parse("bitcoin.tip_lag.signal").expect("valid"),
+            )
             .unwrap();
         assert_eq!(cur.value.status, SignalStatus::Cleared);
     }

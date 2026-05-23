@@ -256,7 +256,7 @@ mod tests {
         vec![
             Observation::metric(
                 ctx(at),
-                "btc.tip",
+                MetricName::parse("btc.tip").expect("valid"),
                 MetricKind::Gauge,
                 MetricValue::Numeric(NumericValue::I64(900_000)),
                 Unit::Count,

@@ -51,7 +51,7 @@ pub struct Observation {
 impl Observation {
     pub fn metric(
         ctx: ObservationContext,
-        name: impl Into<String>,
+        name: MetricName,
         kind: MetricKind,
         value: MetricValue,
         unit: Unit,
@@ -66,7 +66,7 @@ impl Observation {
             origin: ctx.origin,
             attributes,
             payload: ObservationPayload::Metric(MetricObservation {
-                name: MetricName(name.into()),
+                name,
                 kind,
                 value,
                 unit,

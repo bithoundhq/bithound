@@ -252,7 +252,7 @@ mod tests {
         // Metric
         let metric_obs = Observation::metric(
             ctx(alice.clone(), t0()),
-            "peer_count",
+            MetricName::parse("bitcoin.peer_count").expect("valid"),
             MetricKind::Gauge,
             MetricValue::Numeric(NumericValue::U64(8)),
             Unit::Count,
@@ -299,7 +299,7 @@ mod tests {
         let signal_obs = Observation::incident_signal(
             ctx(alice.clone(), t0()),
             IncidentSignalObservation {
-                signal: SignalName("bitcoin.tip_lag.signal".into()),
+                signal: SignalName::parse("bitcoin.tip_lag.signal").expect("valid"),
                 incident_kind: IncidentKind::parse("bitcoin.tip_lag").expect("valid test kind"),
                 severity: SignalSeverity::Warning,
                 status: SignalStatus::Active,
@@ -322,9 +322,12 @@ mod tests {
             _ => panic!(),
         }
 
-        let metric =
-            MetricReadModel::latest_metric(&store, &alice, &MetricName("peer_count".into()))
-                .expect("metric");
+        let metric = MetricReadModel::latest_metric(
+            &store,
+            &alice,
+            &MetricName::parse("bitcoin.peer_count").expect("valid"),
+        )
+        .expect("metric");
         match metric.value.value {
             MetricValue::Numeric(NumericValue::U64(v)) => assert_eq!(v, 8),
             _ => panic!(),
@@ -349,7 +352,7 @@ mod tests {
         let sig = IncidentSignalReadModel::current_signal(
             &store,
             &alice,
-            &SignalName("bitcoin.tip_lag.signal".into()),
+            &SignalName::parse("bitcoin.tip_lag.signal").expect("valid"),
         )
         .expect("signal");
         assert_eq!(sig.value.status, SignalStatus::Active);
@@ -371,14 +374,17 @@ mod tests {
         let samples = MetricReadModel::metric_samples_since(
             &store,
             &alice,
-            &MetricName("peer_count".into()),
+            &MetricName::parse("bitcoin.peer_count").expect("valid"),
             t0() - ChronoDuration::seconds(1),
         );
         assert_eq!(samples.len(), 1);
 
-        let unchanged =
-            MetricReadModel::unchanged_for(&store, &alice, &MetricName("peer_count".into()))
-                .expect("series populated");
+        let unchanged = MetricReadModel::unchanged_for(
+            &store,
+            &alice,
+            &MetricName::parse("bitcoin.peer_count").expect("valid"),
+        )
+        .expect("series populated");
         assert_eq!(unchanged.len(), 1);
 
         let caps = CapabilityReadModel::capabilities_for(&store, &alice);
@@ -440,10 +446,12 @@ mod tests {
 
         // All projections empty.
         assert!(StateReadModel::states_for(&store, &btc("alice")).is_empty());
-        assert!(
-            MetricReadModel::latest_metric(&store, &btc("alice"), &MetricName("x".into()))
-                .is_none()
-        );
+        assert!(MetricReadModel::latest_metric(
+            &store,
+            &btc("alice"),
+            &MetricName::parse("test.missing").expect("valid")
+        )
+        .is_none());
         assert!(HealthReadModel::current_health(
             &store,
             &btc("alice"),

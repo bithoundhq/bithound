@@ -213,7 +213,7 @@ mod tests {
     fn draft(subject: EntityRef, kind: &str, dimension: Option<&str>) -> IncidentSignalDraft {
         IncidentSignalDraft {
             subject,
-            signal: SignalName(format!("{kind}.signal")),
+            signal: SignalName::parse(format!("{kind}.signal")).expect("valid test signal name"),
             kind: IncidentKind::parse(kind).expect("valid test kind"),
             dimension: dimension.map(str::to_string),
             severity: SignalSeverity::Warning,

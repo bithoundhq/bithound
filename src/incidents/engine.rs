@@ -182,7 +182,7 @@ impl IncidentEngine {
                         resolved_at: None,
                         signal_observation_ids: vec![observation_id],
                         evidence: draft.evidence.clone(),
-                        summary: draft.signal.0.clone(),
+                        summary: draft.signal.as_str().to_string(),
                         evidence_summary: vec![],
                     };
                     self.open_incidents
@@ -346,7 +346,7 @@ min_open_confidence = "High"
     ) -> IncidentSignalDraft {
         IncidentSignalDraft {
             subject: EntityRef::BitcoinNode(BitcoinNodeId("alice".into())),
-            signal: SignalName("bitcoin.tip_lag.signal".into()),
+            signal: SignalName::parse("bitcoin.tip_lag.signal").expect("valid"),
             kind: IncidentKind::parse("bitcoin.tip_lag").expect("valid test kind"),
             dimension: None,
             severity,
@@ -491,7 +491,7 @@ min_open_confidence = "High"
             Confidence::Low,
         );
         d.kind = IncidentKind::parse("bitcoin.peer_starvation").expect("valid test kind");
-        d.signal = SignalName("bitcoin.peer_starvation.signal".into());
+        d.signal = SignalName::parse("bitcoin.peer_starvation.signal").expect("valid");
 
         let events = e
             .handle(IncidentCommand::RecordSignal(d), now())
