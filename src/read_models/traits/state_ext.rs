@@ -33,21 +33,21 @@ pub trait StateReadModelExt: StateReadModel {
     ) -> Option<Projected<BitcoinBlockchainState>> {
         unwrap_state(self.latest_state(
             &EntityRef::BitcoinNode(node.clone()),
-            &StateName(observations::state::well_known::BITCOIN_BLOCKCHAIN.to_string()),
+            &StateName::from_well_known(observations::state::well_known::BITCOIN_BLOCKCHAIN),
         ))
     }
 
     fn bitcoin_mempool(&self, node: &BitcoinNodeId) -> Option<Projected<BitcoinMempoolState>> {
         unwrap_state(self.latest_state(
             &EntityRef::BitcoinNode(node.clone()),
-            &StateName(observations::state::well_known::BITCOIN_MEMPOOL.to_string()),
+            &StateName::from_well_known(observations::state::well_known::BITCOIN_MEMPOOL),
         ))
     }
 
     fn bitcoin_network(&self, node: &BitcoinNodeId) -> Option<Projected<BitcoinNetworkState>> {
         unwrap_state(self.latest_state(
             &EntityRef::BitcoinNode(node.clone()),
-            &StateName(observations::state::well_known::BITCOIN_NETWORK.to_string()),
+            &StateName::from_well_known(observations::state::well_known::BITCOIN_NETWORK),
         ))
     }
 
@@ -57,35 +57,35 @@ pub trait StateReadModelExt: StateReadModel {
     ) -> Option<Projected<BitcoinPeerSummaryState>> {
         unwrap_state(self.latest_state(
             &EntityRef::BitcoinNode(node.clone()),
-            &StateName(observations::state::well_known::BITCOIN_PEER_SUMMARY.to_string()),
+            &StateName::from_well_known(observations::state::well_known::BITCOIN_PEER_SUMMARY),
         ))
     }
 
     fn lnd_node(&self, node: &LndNodeId) -> Option<Projected<LndNodeState>> {
         unwrap_state(self.latest_state(
             &EntityRef::LndNode(node.clone()),
-            &StateName(observations::state::well_known::LND_NODE.to_string()),
+            &StateName::from_well_known(observations::state::well_known::LND_NODE),
         ))
     }
 
     fn lnd_wallet(&self, node: &LndNodeId) -> Option<Projected<LndWalletState>> {
         unwrap_state(self.latest_state(
             &EntityRef::LndNode(node.clone()),
-            &StateName(observations::state::well_known::LND_WALLET.to_string()),
+            &StateName::from_well_known(observations::state::well_known::LND_WALLET),
         ))
     }
 
     fn lnd_channel_summary(&self, node: &LndNodeId) -> Option<Projected<LndChannelSummaryState>> {
         unwrap_state(self.latest_state(
             &EntityRef::LndNode(node.clone()),
-            &StateName(observations::state::well_known::LND_CHANNEL_SUMMARY.to_string()),
+            &StateName::from_well_known(observations::state::well_known::LND_CHANNEL_SUMMARY),
         ))
     }
 
     fn host_system(&self, host: &HostId) -> Option<Projected<HostState>> {
         unwrap_state(self.latest_state(
             &EntityRef::Host(host.clone()),
-            &StateName(observations::state::well_known::HOST_SYSTEM.to_string()),
+            &StateName::from_well_known(observations::state::well_known::HOST_SYSTEM),
         ))
     }
 }
@@ -247,7 +247,7 @@ mod tests {
         let observed_at = fixture_observed_at();
         let store = FakeStore {
             subject: EntityRef::BitcoinNode(node.clone()),
-            name: StateName(observations::state::well_known::BITCOIN_BLOCKCHAIN.to_string()),
+            name: StateName::from_well_known(observations::state::well_known::BITCOIN_BLOCKCHAIN),
             value: StateObservation::BitcoinBlockchain(inner.clone()),
             observation_id: obs_id.clone(),
             observed_at,
@@ -257,7 +257,7 @@ mod tests {
         let via_latest = store
             .latest_state(
                 &EntityRef::BitcoinNode(node.clone()),
-                &StateName(observations::state::well_known::BITCOIN_BLOCKCHAIN.to_string()),
+                &StateName::from_well_known(observations::state::well_known::BITCOIN_BLOCKCHAIN),
             )
             .expect("present");
         match via_latest.value {
@@ -278,7 +278,7 @@ mod tests {
         let other = BitcoinNodeId("bob".into());
         let store = FakeStore {
             subject: EntityRef::BitcoinNode(node.clone()),
-            name: StateName(observations::state::well_known::BITCOIN_BLOCKCHAIN.to_string()),
+            name: StateName::from_well_known(observations::state::well_known::BITCOIN_BLOCKCHAIN),
             value: StateObservation::BitcoinBlockchain(BitcoinBlockchainState {
                 chain: "main".into(),
                 blocks: 1,
@@ -304,7 +304,7 @@ mod tests {
         let node = BitcoinNodeId("alice".into());
         let store = FakeStore {
             subject: EntityRef::BitcoinNode(node.clone()),
-            name: StateName(observations::state::well_known::BITCOIN_BLOCKCHAIN.to_string()),
+            name: StateName::from_well_known(observations::state::well_known::BITCOIN_BLOCKCHAIN),
             value: StateObservation::BitcoinMempool(BitcoinMempoolState {
                 loaded: true,
                 tx_count: 0,

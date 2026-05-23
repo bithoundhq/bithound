@@ -42,11 +42,23 @@ mod tests {
         let registry = KindRegistry::load(None).expect("embedded default kinds load");
 
         for name in ALL {
-            let kind = IncidentKind((*name).into());
+            let kind = IncidentKind::from_well_known(name);
             assert!(
                 registry.lookup(&kind).is_some(),
                 "well_known constant {name:?} missing from default_kinds.toml",
             );
+        }
+    }
+
+    /// Every constant in [`ALL`] must satisfy the shared dotted-name
+    /// grammar so `IncidentKind::from_well_known` is a safe fast path
+    /// in release builds (where the debug-assert is compiled out).
+    #[test]
+    fn all_constants_parse_as_dotted_names() {
+        use crate::shared::parse::parse_dotted_name;
+        for name in ALL {
+            parse_dotted_name(name)
+                .unwrap_or_else(|e| panic!("well_known constant {name:?} fails parse: {e}"));
         }
     }
 }

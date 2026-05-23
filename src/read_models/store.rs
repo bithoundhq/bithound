@@ -252,7 +252,7 @@ mod tests {
         // Metric
         let metric_obs = Observation::metric(
             ctx(alice.clone(), t0()),
-            "peer_count",
+            MetricName::parse("bitcoin.peer_count").expect("valid"),
             MetricKind::Gauge,
             MetricValue::Numeric(NumericValue::U64(8)),
             Unit::Count,
@@ -263,7 +263,7 @@ mod tests {
         // Health
         let health_obs = Observation::health(
             ctx(alice.clone(), t0()),
-            "bitcoin.rpc",
+            HealthTargetId::parse("bitcoin.rpc").expect("valid"),
             HealthStatus::Ok,
             Some(12),
             None,
@@ -275,7 +275,7 @@ mod tests {
         // Capability
         let cap_obs = Observation::capability(
             ctx(alice.clone(), t0()),
-            "bitcoin.zmq.rawtx",
+            CapabilityName::parse("bitcoin.zmq.rawtx").expect("valid"),
             CapabilityStatus::Available,
             None,
             Attributes(BTreeMap::new()),
@@ -299,8 +299,8 @@ mod tests {
         let signal_obs = Observation::incident_signal(
             ctx(alice.clone(), t0()),
             IncidentSignalObservation {
-                signal: SignalName("bitcoin.tip_lag.signal".into()),
-                incident_kind: IncidentKind("bitcoin.tip_lag".into()),
+                signal: SignalName::parse("bitcoin.tip_lag.signal").expect("valid"),
+                incident_kind: IncidentKind::parse("bitcoin.tip_lag").expect("valid test kind"),
                 severity: SignalSeverity::Warning,
                 status: SignalStatus::Active,
                 confidence: Confidence::High,
@@ -314,7 +314,7 @@ mod tests {
         let state = StateReadModel::latest_state(
             &store,
             &alice,
-            &StateName(crate::observations::state::well_known::BITCOIN_BLOCKCHAIN.to_string()),
+            &StateName::from_well_known(crate::observations::state::well_known::BITCOIN_BLOCKCHAIN),
         )
         .expect("state");
         match state.value {
@@ -322,23 +322,29 @@ mod tests {
             _ => panic!(),
         }
 
-        let metric =
-            MetricReadModel::latest_metric(&store, &alice, &MetricName("peer_count".into()))
-                .expect("metric");
+        let metric = MetricReadModel::latest_metric(
+            &store,
+            &alice,
+            &MetricName::parse("bitcoin.peer_count").expect("valid"),
+        )
+        .expect("metric");
         match metric.value.value {
             MetricValue::Numeric(NumericValue::U64(v)) => assert_eq!(v, 8),
             _ => panic!(),
         }
 
-        let health =
-            HealthReadModel::current_health(&store, &alice, &HealthTargetId("bitcoin.rpc".into()))
-                .expect("health");
+        let health = HealthReadModel::current_health(
+            &store,
+            &alice,
+            &HealthTargetId::parse("bitcoin.rpc").expect("valid"),
+        )
+        .expect("health");
         assert_eq!(health.value.status, HealthStatus::Ok);
 
         let cap = CapabilityReadModel::current_capability(
             &store,
             &alice,
-            &CapabilityName("bitcoin.zmq.rawtx".into()),
+            &CapabilityName::parse("bitcoin.zmq.rawtx").expect("valid"),
         )
         .expect("capability");
         assert_eq!(cap.value.status, CapabilityStatus::Available);
@@ -349,7 +355,7 @@ mod tests {
         let sig = IncidentSignalReadModel::current_signal(
             &store,
             &alice,
-            &SignalName("bitcoin.tip_lag.signal".into()),
+            &SignalName::parse("bitcoin.tip_lag.signal").expect("valid"),
         )
         .expect("signal");
         assert_eq!(sig.value.status, SignalStatus::Active);
@@ -357,7 +363,7 @@ mod tests {
         let active_for_kind = IncidentSignalReadModel::active_signals_for_incident_kind(
             &store,
             &alice,
-            &IncidentKind("bitcoin.tip_lag".into()),
+            &IncidentKind::parse("bitcoin.tip_lag").expect("valid test kind"),
         );
         assert_eq!(active_for_kind.len(), 1);
 
@@ -371,14 +377,17 @@ mod tests {
         let samples = MetricReadModel::metric_samples_since(
             &store,
             &alice,
-            &MetricName("peer_count".into()),
+            &MetricName::parse("bitcoin.peer_count").expect("valid"),
             t0() - ChronoDuration::seconds(1),
         );
         assert_eq!(samples.len(), 1);
 
-        let unchanged =
-            MetricReadModel::unchanged_for(&store, &alice, &MetricName("peer_count".into()))
-                .expect("series populated");
+        let unchanged = MetricReadModel::unchanged_for(
+            &store,
+            &alice,
+            &MetricName::parse("bitcoin.peer_count").expect("valid"),
+        )
+        .expect("series populated");
         assert_eq!(unchanged.len(), 1);
 
         let caps = CapabilityReadModel::capabilities_for(&store, &alice);
@@ -399,7 +408,7 @@ mod tests {
         // Event payload — no projection cares.
         let event_obs = Observation::event(
             ctx(alice.clone(), t0()),
-            "ibd_started",
+            crate::observations::EventName::parse("bitcoin.ibd_started").expect("valid"),
             crate::observations::EventSeverity::Info,
             None,
             Attributes(BTreeMap::new()),
@@ -409,7 +418,7 @@ mod tests {
         // Transition payload — no projection cares.
         let transition_obs = Observation::transition(
             ctx(alice.clone(), t0()),
-            "ibd",
+            crate::observations::TransitionName::parse("bitcoin.ibd").expect("valid"),
             crate::observations::StateAtom::String("active".into()),
             crate::observations::StateAtom::String("done".into()),
             None,
@@ -420,7 +429,7 @@ mod tests {
         // Inventory payload — no projection cares.
         let inventory_obs = Observation::inventory(
             ctx(alice.clone(), t0()),
-            "facts",
+            crate::observations::InventoryName::parse("bitcoin.facts").expect("valid"),
             BTreeMap::new(),
             Attributes(BTreeMap::new()),
         );
@@ -428,7 +437,7 @@ mod tests {
 
         // Diagnosis payload — no projection cares.
         let diag = crate::observations::DiagnosisObservation {
-            diagnosis: crate::observations::DiagnosisName("x".into()),
+            diagnosis: crate::observations::DiagnosisName::parse("test.dummy").expect("valid"),
             summary: "y".into(),
             confidence: Confidence::Medium,
             likely_causes: vec![],
@@ -440,14 +449,16 @@ mod tests {
 
         // All projections empty.
         assert!(StateReadModel::states_for(&store, &btc("alice")).is_empty());
-        assert!(
-            MetricReadModel::latest_metric(&store, &btc("alice"), &MetricName("x".into()))
-                .is_none()
-        );
+        assert!(MetricReadModel::latest_metric(
+            &store,
+            &btc("alice"),
+            &MetricName::parse("test.missing").expect("valid")
+        )
+        .is_none());
         assert!(HealthReadModel::current_health(
             &store,
             &btc("alice"),
-            &HealthTargetId("x".into())
+            &HealthTargetId::parse("test.missing").expect("valid")
         )
         .is_none());
         assert!(CapabilityReadModel::capabilities_for(&store, &btc("alice")).is_empty());

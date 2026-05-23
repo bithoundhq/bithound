@@ -106,7 +106,7 @@ mod tests {
     ) -> Observation {
         Observation::capability(
             ctx(subject, observed_at),
-            name,
+            CapabilityName::parse(name).expect("valid test capability name"),
             status,
             None,
             Attributes(BTreeMap::new()),
@@ -120,7 +120,7 @@ mod tests {
     #[test]
     fn default_is_empty() {
         let p = CapabilityProjection::default();
-        let c = CapabilityName("bitcoin.zmq.rawtx".into());
+        let c = CapabilityName::parse("bitcoin.zmq.rawtx").expect("valid");
         assert!(p.current_capability(&btc("alice"), &c).is_none());
     }
 
@@ -142,7 +142,10 @@ mod tests {
         p.apply(&a).unwrap();
         p.apply(&b).unwrap();
         let cur = p
-            .current_capability(&btc("alice"), &CapabilityName("bitcoin.zmq.rawtx".into()))
+            .current_capability(
+                &btc("alice"),
+                &CapabilityName::parse("bitcoin.zmq.rawtx").expect("valid"),
+            )
             .unwrap();
         assert_eq!(cur.value.status, CapabilityStatus::Unavailable);
         assert_eq!(cur.observation_id, b.id);
@@ -166,7 +169,10 @@ mod tests {
         p.apply(&newer).unwrap();
         p.apply(&older).unwrap();
         let cur = p
-            .current_capability(&btc("alice"), &CapabilityName("bitcoin.zmq.rawtx".into()))
+            .current_capability(
+                &btc("alice"),
+                &CapabilityName::parse("bitcoin.zmq.rawtx").expect("valid"),
+            )
             .unwrap();
         assert_eq!(cur.value.status, CapabilityStatus::Unavailable);
     }

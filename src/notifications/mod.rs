@@ -1,3 +1,4 @@
+pub mod events;
 mod orchestrator;
 pub mod repository;
 pub mod targets;

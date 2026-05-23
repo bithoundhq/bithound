@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     incidents::{IncidentFingerprint, IncidentKind},
@@ -42,7 +43,7 @@ pub struct DiagnosticContext<'a> {
     pub signals: &'a dyn IncidentSignalReadModel,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IncidentSignalDraft {
     pub subject: EntityRef,
     pub signal: SignalName,

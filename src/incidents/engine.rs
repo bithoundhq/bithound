@@ -182,7 +182,7 @@ impl IncidentEngine {
                         resolved_at: None,
                         signal_observation_ids: vec![observation_id],
                         evidence: draft.evidence.clone(),
-                        summary: draft.signal.0.clone(),
+                        summary: draft.signal.as_str().to_string(),
                         evidence_summary: vec![],
                     };
                     self.open_incidents
@@ -334,7 +334,7 @@ min_open_confidence = "High"
     fn fp_tip_lag() -> IncidentFingerprint {
         IncidentFingerprint {
             subject: EntityRef::BitcoinNode(BitcoinNodeId("alice".into())),
-            kind: IncidentKind("bitcoin.tip_lag".into()),
+            kind: IncidentKind::parse("bitcoin.tip_lag").expect("valid test kind"),
             dimension: None,
         }
     }
@@ -346,8 +346,8 @@ min_open_confidence = "High"
     ) -> IncidentSignalDraft {
         IncidentSignalDraft {
             subject: EntityRef::BitcoinNode(BitcoinNodeId("alice".into())),
-            signal: SignalName("bitcoin.tip_lag.signal".into()),
-            kind: IncidentKind("bitcoin.tip_lag".into()),
+            signal: SignalName::parse("bitcoin.tip_lag.signal").expect("valid"),
+            kind: IncidentKind::parse("bitcoin.tip_lag").expect("valid test kind"),
             dimension: None,
             severity,
             status,
@@ -388,7 +388,7 @@ min_open_confidence = "High"
         let a = open_incident(fp_tip_lag(), IncidentSeverity::Warning);
         let other_fp = IncidentFingerprint {
             subject: EntityRef::BitcoinNode(BitcoinNodeId("bob".into())),
-            kind: IncidentKind("bitcoin.tip_lag".into()),
+            kind: IncidentKind::parse("bitcoin.tip_lag").expect("valid test kind"),
             dimension: None,
         };
         let b = open_incident(other_fp.clone(), IncidentSeverity::Warning);
@@ -417,7 +417,7 @@ min_open_confidence = "High"
             SignalStatus::Active,
             Confidence::High,
         );
-        d.kind = IncidentKind("bitcoin.nonexistent".into());
+        d.kind = IncidentKind::parse("bitcoin.nonexistent").expect("valid test kind");
 
         let err = e
             .handle(IncidentCommand::RecordSignal(d), now())
@@ -490,8 +490,8 @@ min_open_confidence = "High"
             SignalStatus::Active,
             Confidence::Low,
         );
-        d.kind = IncidentKind("bitcoin.peer_starvation".into());
-        d.signal = SignalName("bitcoin.peer_starvation.signal".into());
+        d.kind = IncidentKind::parse("bitcoin.peer_starvation").expect("valid test kind");
+        d.signal = SignalName::parse("bitcoin.peer_starvation.signal").expect("valid");
 
         let events = e
             .handle(IncidentCommand::RecordSignal(d), now())
@@ -505,7 +505,10 @@ min_open_confidence = "High"
                 confidence,
                 floor,
             } => {
-                assert_eq!(*kind, IncidentKind("bitcoin.peer_starvation".into()));
+                assert_eq!(
+                    *kind,
+                    IncidentKind::parse("bitcoin.peer_starvation").expect("valid")
+                );
                 assert_eq!(*confidence, Confidence::Low);
                 assert_eq!(*floor, Confidence::High);
             }

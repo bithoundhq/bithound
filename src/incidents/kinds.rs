@@ -26,7 +26,7 @@ pub enum KindSource {
 
 #[derive(Debug, Clone)]
 pub struct IncidentKindSpec {
-    pub name: String,
+    pub name: IncidentKind,
     pub allowed_subjects: Vec<EntitySubjectKind>,
     pub allows_dimension: bool,
     pub dimension_label: Option<String>,
@@ -136,7 +136,7 @@ fn insert_from_toml(
 
     for entry in parsed.kinds {
         let spec = parse_entry(entry, source.clone())?;
-        let key = IncidentKind(spec.name.clone());
+        let key = spec.name.clone();
 
         if let Some(existing) = kinds.get(&key) {
             return Err(match (existing.source.clone(), &source) {
@@ -192,7 +192,10 @@ struct KindsToml {
 
 #[derive(Debug, Deserialize)]
 struct KindEntryToml {
-    name: String,
+    /// Deserialized through `IncidentKind`'s `try_from = "String"`, so
+    /// a malformed name in the catalog fails TOML deserialization
+    /// before this struct exists.
+    name: IncidentKind,
     allowed_subjects: Vec<String>,
     allows_dimension: bool,
     #[serde(default)]
@@ -210,8 +213,8 @@ mod tests {
     fn draft(subject: EntityRef, kind: &str, dimension: Option<&str>) -> IncidentSignalDraft {
         IncidentSignalDraft {
             subject,
-            signal: SignalName(format!("{kind}.signal")),
-            kind: IncidentKind(kind.into()),
+            signal: SignalName::parse(format!("{kind}.signal")).expect("valid test signal name"),
+            kind: IncidentKind::parse(kind).expect("valid test kind"),
             dimension: dimension.map(str::to_string),
             severity: SignalSeverity::Warning,
             status: SignalStatus::Active,
@@ -243,7 +246,7 @@ min_open_confidence = "High"
         let reg = registry();
 
         let tip_lag = reg
-            .lookup(&IncidentKind("bitcoin.tip_lag".into()))
+            .lookup(&IncidentKind::parse("bitcoin.tip_lag").expect("valid"))
             .expect("known kind");
         assert_eq!(
             tip_lag.allowed_subjects,
@@ -255,7 +258,7 @@ min_open_confidence = "High"
         assert_eq!(tip_lag.source, KindSource::Builtin);
 
         let disk = reg
-            .lookup(&IncidentKind("host.disk_exhaustion".into()))
+            .lookup(&IncidentKind::parse("host.disk_exhaustion").expect("valid"))
             .expect("known kind");
         assert!(disk.allows_dimension);
         assert_eq!(disk.dimension_label.as_deref(), Some("mount_path"));
@@ -290,9 +293,9 @@ min_open_confidence = "High"
         );
         assert_eq!(
             reg.validate_draft(&bad),
-            Err(DraftError::UnknownKind(IncidentKind(
-                "bitcoin.nonexistent".into()
-            )))
+            Err(DraftError::UnknownKind(
+                IncidentKind::parse("bitcoin.nonexistent").expect("valid")
+            ))
         );
     }
 
@@ -307,7 +310,7 @@ min_open_confidence = "High"
         assert_eq!(
             reg.validate_draft(&bad),
             Err(DraftError::DisallowedSubject {
-                kind: IncidentKind("bitcoin.tip_lag".into()),
+                kind: IncidentKind::parse("bitcoin.tip_lag").expect("valid"),
                 subject: EntitySubjectKind::LndNode,
                 allowed: vec![EntitySubjectKind::BitcoinNode],
             })
@@ -324,9 +327,9 @@ min_open_confidence = "High"
         );
         assert_eq!(
             reg.validate_draft(&bad),
-            Err(DraftError::DimensionRequired(IncidentKind(
-                "host.disk_exhaustion".into()
-            )))
+            Err(DraftError::DimensionRequired(
+                IncidentKind::parse("host.disk_exhaustion").expect("valid")
+            ))
         );
     }
 
@@ -340,9 +343,9 @@ min_open_confidence = "High"
         );
         assert_eq!(
             reg.validate_draft(&bad),
-            Err(DraftError::DimensionForbidden(IncidentKind(
-                "bitcoin.tip_lag".into()
-            )))
+            Err(DraftError::DimensionForbidden(
+                IncidentKind::parse("bitcoin.tip_lag").expect("valid")
+            ))
         );
     }
 
@@ -357,7 +360,9 @@ allows_dimension = false
         let err = KindRegistry::load_from_toml_strs(SAMPLE_BUILTIN, Some(user)).unwrap_err();
         assert_eq!(
             err,
-            RegistryError::CannotOverrideBuiltin(IncidentKind("bitcoin.tip_lag".into()))
+            RegistryError::CannotOverrideBuiltin(
+                IncidentKind::parse("bitcoin.tip_lag").expect("valid")
+            )
         );
     }
 
@@ -371,7 +376,7 @@ allows_dimension = false
 "#;
         let reg = KindRegistry::load_from_toml_strs(SAMPLE_BUILTIN, Some(user)).expect("load");
         let spec = reg
-            .lookup(&IncidentKind("operator.custom_check".into()))
+            .lookup(&IncidentKind::parse("operator.custom_check").expect("valid"))
             .expect("user kind");
         assert_eq!(spec.source, KindSource::UserConfig);
 
@@ -399,7 +404,7 @@ allows_dimension = false
         let err = KindRegistry::load_from_toml_strs(builtin, None).unwrap_err();
         assert_eq!(
             err,
-            RegistryError::DuplicateKind(IncidentKind("bitcoin.tip_lag".into()))
+            RegistryError::DuplicateKind(IncidentKind::parse("bitcoin.tip_lag").expect("valid"))
         );
     }
 

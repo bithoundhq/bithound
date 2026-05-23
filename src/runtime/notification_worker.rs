@@ -196,7 +196,7 @@ mod tests {
     }
 
     fn fake_incident(subject: EntityRef) -> Incident {
-        let kind = IncidentKind("test.kind".into());
+        let kind = IncidentKind::parse("test.kind").expect("valid test kind");
         let now = Utc::now();
         Incident {
             id: IncidentId(Uuid::now_v7()),

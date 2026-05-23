@@ -104,7 +104,7 @@ mod tests {
     ) -> Observation {
         Observation::health(
             ctx(subject, observed_at),
-            target,
+            HealthTargetId::parse(target).expect("valid test health target"),
             status,
             None,
             None,
@@ -120,7 +120,7 @@ mod tests {
     #[test]
     fn default_is_empty() {
         let p = HealthProjection::default();
-        let t = HealthTargetId("bitcoin.rpc".into());
+        let t = HealthTargetId::parse("bitcoin.rpc").expect("valid");
         assert!(p.current_health(&btc("alice"), &t).is_none());
     }
 
@@ -137,7 +137,10 @@ mod tests {
         p.apply(&a).unwrap();
         p.apply(&b).unwrap();
         let cur = p
-            .current_health(&btc("alice"), &HealthTargetId("bitcoin.rpc".into()))
+            .current_health(
+                &btc("alice"),
+                &HealthTargetId::parse("bitcoin.rpc").expect("valid"),
+            )
             .unwrap();
         assert_eq!(cur.value.status, HealthStatus::Critical);
         assert_eq!(cur.observation_id, b.id);
@@ -156,7 +159,10 @@ mod tests {
         p.apply(&newer).unwrap();
         p.apply(&older).unwrap();
         let cur = p
-            .current_health(&btc("alice"), &HealthTargetId("bitcoin.rpc".into()))
+            .current_health(
+                &btc("alice"),
+                &HealthTargetId::parse("bitcoin.rpc").expect("valid"),
+            )
             .unwrap();
         assert_eq!(cur.value.status, HealthStatus::Critical);
     }
@@ -164,12 +170,27 @@ mod tests {
     #[test]
     fn for_subject_scans_only_that_subject() {
         let mut p = HealthProjection::new();
-        p.apply(&health_obs(btc("alice"), "rpc", HealthStatus::Ok, t0()))
-            .unwrap();
-        p.apply(&health_obs(btc("alice"), "zmq", HealthStatus::Ok, t0()))
-            .unwrap();
-        p.apply(&health_obs(btc("bob"), "rpc", HealthStatus::Critical, t0()))
-            .unwrap();
+        p.apply(&health_obs(
+            btc("alice"),
+            "bitcoin.rpc",
+            HealthStatus::Ok,
+            t0(),
+        ))
+        .unwrap();
+        p.apply(&health_obs(
+            btc("alice"),
+            "bitcoin.zmq",
+            HealthStatus::Ok,
+            t0(),
+        ))
+        .unwrap();
+        p.apply(&health_obs(
+            btc("bob"),
+            "bitcoin.rpc",
+            HealthStatus::Critical,
+            t0(),
+        ))
+        .unwrap();
 
         let alice = p.for_subject(&btc("alice"));
         assert_eq!(alice.len(), 2);

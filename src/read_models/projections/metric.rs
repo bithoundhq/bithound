@@ -162,7 +162,7 @@ mod tests {
     ) -> Observation {
         Observation::metric(
             ctx(subject, observed_at),
-            name,
+            MetricName::parse(name).expect("valid test metric name"),
             MetricKind::Gauge,
             MetricValue::Numeric(NumericValue::U64(value)),
             Unit::Count,
@@ -175,7 +175,7 @@ mod tests {
     }
 
     fn name() -> MetricName {
-        MetricName("peer_count".into())
+        MetricName::parse("bitcoin.peer_count").expect("valid")
     }
 
     #[test]
@@ -203,7 +203,7 @@ mod tests {
         for i in 0..5 {
             p.apply(&metric_obs(
                 btc(),
-                "peer_count",
+                "bitcoin.peer_count",
                 i as u64,
                 t0() + ChronoDuration::seconds(i),
             ))
@@ -227,7 +227,7 @@ mod tests {
         for i in 1..=3u64 {
             p.apply(&metric_obs(
                 btc(),
-                "peer_count",
+                "bitcoin.peer_count",
                 i * 10,
                 t0() + ChronoDuration::seconds(i as i64),
             ))
@@ -246,7 +246,7 @@ mod tests {
         for i in 0..5u64 {
             p.apply(&metric_obs(
                 btc(),
-                "peer_count",
+                "bitcoin.peer_count",
                 i,
                 t0() + ChronoDuration::seconds(i as i64 * 10),
             ))
@@ -267,7 +267,8 @@ mod tests {
     #[test]
     fn unchanged_for_returns_at_least_the_latest_sample() {
         let mut p = MetricProjection::with_capacity(10);
-        p.apply(&metric_obs(btc(), "peer_count", 42, t0())).unwrap();
+        p.apply(&metric_obs(btc(), "bitcoin.peer_count", 42, t0()))
+            .unwrap();
         let run = p.unchanged_for(&btc(), &name()).unwrap();
         assert_eq!(run.len(), 1);
     }
@@ -279,7 +280,7 @@ mod tests {
         for (i, v) in series.iter().enumerate() {
             p.apply(&metric_obs(
                 btc(),
-                "peer_count",
+                "bitcoin.peer_count",
                 *v,
                 t0() + ChronoDuration::seconds(i as i64),
             ))
@@ -330,7 +331,7 @@ mod tests {
         for i in 0..(cap * 10) as u64 {
             p.apply(&metric_obs(
                 btc(),
-                "peer_count",
+                "bitcoin.peer_count",
                 i,
                 t0() + ChronoDuration::seconds(i as i64),
             ))

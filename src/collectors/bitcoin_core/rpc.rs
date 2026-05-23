@@ -166,7 +166,7 @@ impl PollingCollector for BitcoinCoreRpcCollector {
                 ));
                 partials.push(Observation::health(
                     self.obs_context(&ctx.sidecar_id, s),
-                    HEALTH_BLOCKCHAIN,
+                    HealthTargetId::from_well_known(HEALTH_BLOCKCHAIN),
                     HealthStatus::Ok,
                     duration_ms(s, e),
                     None,
@@ -187,7 +187,7 @@ impl PollingCollector for BitcoinCoreRpcCollector {
                 ));
                 partials.push(Observation::health(
                     self.obs_context(&ctx.sidecar_id, s),
-                    HEALTH_MEMPOOL,
+                    HealthTargetId::from_well_known(HEALTH_MEMPOOL),
                     HealthStatus::Ok,
                     duration_ms(s, e),
                     None,
@@ -212,7 +212,7 @@ impl PollingCollector for BitcoinCoreRpcCollector {
                 ));
                 partials.push(Observation::health(
                     self.obs_context(&ctx.sidecar_id, s),
-                    HEALTH_NETWORK,
+                    HealthTargetId::from_well_known(HEALTH_NETWORK),
                     HealthStatus::Ok,
                     duration_ms(s, e),
                     None,
@@ -237,7 +237,7 @@ impl PollingCollector for BitcoinCoreRpcCollector {
                 ));
                 partials.push(Observation::health(
                     self.obs_context(&ctx.sidecar_id, s),
-                    HEALTH_PEERS,
+                    HealthTargetId::from_well_known(HEALTH_PEERS),
                     HealthStatus::Ok,
                     duration_ms(s, e),
                     None,
@@ -303,8 +303,12 @@ impl BitcoinCoreRpcCollector {
         let message = err.to_string();
         let latency_ms = duration_ms(observed_at, completed_at);
 
+        // `target` is one of the HEALTH_* constants from this module
+        // (see HEALTH_TARGETS / first_failure tuples above), each of
+        // which satisfies the parse rule guarded by the test below.
         let health = HealthCheckObservation {
-            target: HealthTargetId(target.to_string()),
+            target: HealthTargetId::parse(target)
+                .expect("HEALTH_* constants satisfy the parse rule"),
             status: HealthStatus::Critical,
             latency_ms,
             message: Some(message.clone()),
@@ -807,7 +811,7 @@ mod tests {
                 error,
             } => {
                 assert_eq!(partial_observations.len(), 0);
-                assert_eq!(health.target.0, HEALTH_BLOCKCHAIN);
+                assert_eq!(health.target.as_str(), HEALTH_BLOCKCHAIN);
                 assert_eq!(error.kind, CollectionErrorKind::ProtocolError);
             }
             ProbeResult::Ok { .. } => panic!("expected Failed"),
@@ -844,7 +848,7 @@ mod tests {
                     4,
                     "state+health for the first two RPCs"
                 );
-                assert_eq!(health.target.0, HEALTH_NETWORK);
+                assert_eq!(health.target.as_str(), HEALTH_NETWORK);
                 assert_eq!(error.kind, CollectionErrorKind::ProtocolError);
             }
             ProbeResult::Ok { .. } => panic!("expected Failed"),

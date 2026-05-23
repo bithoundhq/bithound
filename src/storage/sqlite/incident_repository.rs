@@ -60,7 +60,7 @@ impl IncidentRepository for SqliteIncidentRepository {
         )
         .bind(incident.id.0)
         .bind(incident.fingerprint.as_key())
-        .bind(&incident.kind.0)
+        .bind(incident.kind.as_str())
         .bind(subject_kind)
         .bind(subject_id)
         .bind(severity_str(&incident.severity))
@@ -127,7 +127,7 @@ mod tests {
     fn sample_incident(status: IncidentStatus) -> Incident {
         let opened = Utc.timestamp_nanos(1_700_000_000_000_000_000);
         let subject = EntityRef::BitcoinNode(BitcoinNodeId("alice".into()));
-        let kind = IncidentKind("bitcoin.no_peers".into());
+        let kind = IncidentKind::parse("bitcoin.no_peers").expect("valid test kind");
         let resolved_at = matches!(status, IncidentStatus::Resolved).then_some(opened);
         Incident {
             id: IncidentId::new(),

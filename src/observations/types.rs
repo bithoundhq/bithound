@@ -51,7 +51,7 @@ pub struct Observation {
 impl Observation {
     pub fn metric(
         ctx: ObservationContext,
-        name: impl Into<String>,
+        name: MetricName,
         kind: MetricKind,
         value: MetricValue,
         unit: Unit,
@@ -66,7 +66,7 @@ impl Observation {
             origin: ctx.origin,
             attributes,
             payload: ObservationPayload::Metric(MetricObservation {
-                name: MetricName(name.into()),
+                name,
                 kind,
                 value,
                 unit,
@@ -76,7 +76,7 @@ impl Observation {
 
     pub fn capability(
         ctx: ObservationContext,
-        name: impl Into<String>,
+        name: CapabilityName,
         status: CapabilityStatus,
         reason: Option<String>,
         attributes: Attributes,
@@ -90,7 +90,7 @@ impl Observation {
             origin: ctx.origin,
             attributes,
             payload: ObservationPayload::Capability(CapabilityObservation {
-                capability: CapabilityName(name.into()),
+                capability: name,
                 status,
                 reason,
             }),
@@ -99,7 +99,7 @@ impl Observation {
 
     pub fn event(
         ctx: ObservationContext,
-        name: impl Into<String>,
+        name: EventName,
         severity: EventSeverity,
         body: Option<String>,
         attributes: Attributes,
@@ -113,7 +113,7 @@ impl Observation {
             origin: ctx.origin,
             attributes,
             payload: ObservationPayload::Event(EventObservation {
-                name: EventName(name.into()),
+                name,
                 severity,
                 body,
             }),
@@ -152,7 +152,7 @@ impl Observation {
 
     pub fn health(
         ctx: ObservationContext,
-        target: impl Into<String>,
+        target: HealthTargetId,
         status: HealthStatus,
         latency_ms: Option<u64>,
         message: Option<String>,
@@ -168,7 +168,7 @@ impl Observation {
             origin: ctx.origin,
             attributes,
             payload: ObservationPayload::Health(HealthCheckObservation {
-                target: HealthTargetId(target.into()),
+                target,
                 status,
                 latency_ms,
                 message,
@@ -179,7 +179,7 @@ impl Observation {
 
     pub fn inventory(
         ctx: ObservationContext,
-        name: impl Into<String>,
+        name: InventoryName,
         facts: BTreeMap<String, InventoryValue>,
         attributes: Attributes,
     ) -> Self {
@@ -191,10 +191,7 @@ impl Observation {
             subject: ctx.subject,
             origin: ctx.origin,
             attributes,
-            payload: ObservationPayload::Inventory(InventoryObservation {
-                name: InventoryName(name.into()),
-                facts,
-            }),
+            payload: ObservationPayload::Inventory(InventoryObservation { name, facts }),
         }
     }
 
@@ -213,7 +210,7 @@ impl Observation {
 
     pub fn transition(
         ctx: ObservationContext,
-        name: impl Into<String>,
+        name: TransitionName,
         from: StateAtom,
         to: StateAtom,
         reason: Option<String>,
@@ -228,7 +225,7 @@ impl Observation {
             origin: ctx.origin,
             attributes,
             payload: ObservationPayload::Transition(TransitionObservation {
-                name: TransitionName(name.into()),
+                name,
                 from,
                 to,
                 reason,
@@ -400,7 +397,8 @@ mod tests {
 
     #[test]
     fn incident_signal_payload_roundtrips_via_serde() {
-        let kind = crate::incidents::IncidentKind("bitcoin.no_peers".into());
+        let kind =
+            crate::incidents::IncidentKind::parse("bitcoin.no_peers").expect("valid test kind");
         let signal = IncidentSignalObservation {
             signal: SignalName::for_incident_kind(&kind),
             incident_kind: kind,
@@ -421,7 +419,7 @@ mod tests {
     #[test]
     fn diagnosis_payload_roundtrips_via_serde() {
         let diagnosis = DiagnosisObservation {
-            diagnosis: DiagnosisName("bitcoin.tip_lag.assessment".into()),
+            diagnosis: DiagnosisName::parse("bitcoin.tip_lag.assessment").expect("valid"),
             summary: "node likely stuck in IBD".into(),
             confidence: Confidence::Medium,
             likely_causes: vec!["maxtipage heuristic".into()],

@@ -136,7 +136,7 @@ mod tests {
     fn default_is_empty() {
         let p = StateProjection::default();
         let name =
-            StateName(crate::observations::state::well_known::BITCOIN_BLOCKCHAIN.to_string());
+            StateName::from_well_known(crate::observations::state::well_known::BITCOIN_BLOCKCHAIN);
         assert!(p.get_latest(&btc("alice"), &name).is_none());
     }
 
@@ -222,7 +222,7 @@ mod tests {
         let mut p = StateProjection::new();
         let obs = Observation::metric(
             ctx(btc("alice"), at(0)),
-            "x",
+            crate::observations::MetricName::parse("test.dummy").expect("valid"),
             crate::observations::MetricKind::Gauge,
             crate::observations::MetricValue::Numeric(crate::observations::NumericValue::U64(1)),
             crate::observations::Unit::Count,

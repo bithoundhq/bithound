@@ -13,6 +13,48 @@ mock bitcoind, plus a refreshed README and a new operator guide.
 
 ## [Unreleased]
 
+## [0.0.6.0] - 2026-05-23
+
+### Changed
+
+Phase D — DMMF domain refinement. Seven tickets aligning Bithound's
+type system with Wlaschin's "Domain Modeling Made Functional"
+patterns (ADRs D1–D4; BTH-47 and BTH-48 landed earlier).
+
+- **BTH-42: `parse_dotted_name` scaffolding.** New
+  `src/shared/parse.rs` defines the shared dotted-namespace grammar
+  (`[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+`, 1–128 chars) and the
+  positional `ParseDottedNameError` returned by every smart-constructor
+  parse failure.
+- **BTH-43..BTH-46: name-newtype migration.** All ten name newtypes
+  (`IncidentKind`, `MetricName`, `SignalName`, `StateName`,
+  `HealthTargetId`, `CapabilityName`, `EventName`, `TransitionName`,
+  `InventoryName`, `DiagnosisName`) now have private inner fields and
+  are constructed only through `parse` or `from_well_known`. Serde
+  `try_from = "String"` re-validates malformed names at deserialization
+  time. The catalog TOML parser deserializes incident-kind names
+  through the smart constructor, so a malformed name in
+  `default_kinds.toml` (or a user override) is surfaced as
+  `RegistryError::InvalidToml`. The `Observation` constructors that
+  used to take `impl Into<String>` (`metric`, `capability`, `event`,
+  `health`, `inventory`, `transition`) now take typed names; callers
+  validate before constructing.
+- **BTH-49: suppression vocabulary.** New
+  `src/incidents/suppression.rs` defines `SuppressionCommand` and the
+  `SuppressionService` async trait per ADR-D3. V0/V0.1 ship no
+  concrete impl; the types stabilize the shape for V0.2 wiring.
+- **BTH-50: per-context events + `DomainEvent` envelope.** Each
+  domain context (observations, read_models, diagnostics, incidents,
+  notifications) now owns an `events.rs` module per ADR-D4. The new
+  top-level `crate::domain_events::DomainEvent` enum sums them with
+  `From<*Event>` impls. V0 does not run an event bus; the enums are
+  type-level documentation today and cloud-sync-ready tomorrow.
+
+No behavioral changes for operators: the pipeline still observes,
+detects, and notifies exactly as in 0.0.5.x. The migration is
+type-system-only and is mechanical from the caller's side
+(`IncidentKind("foo".into())` → `IncidentKind::parse("foo")?`).
+
 ## [0.0.5.1] - 2026-05-22
 
 ### Changed
