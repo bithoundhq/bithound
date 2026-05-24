@@ -10,7 +10,6 @@
 //! spec-order processing, per-RPC health observations, partial-
 //! failure preservation.
 
-use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -20,13 +19,14 @@ use thiserror::Error;
 
 use super::grpc_client::{BuildError as ClientBuildError, LndGrpcClient, LndRpcError};
 use super::lnrpc::{Channel, GetInfoResponse, ListChannelsResponse, ListPeersResponse};
+use crate::collectors::helpers::{duration_ms, empty_attrs, safe_probe_window, timed};
 use crate::collectors::registry::LndNodeConnection;
 use crate::collectors::traits::PollingCollector;
 use crate::collectors::{CollectionContext, CollectionError, CollectorDescriptor, CollectorTarget};
 use crate::observations::{
-    Attributes, HealthCheckObservation, HealthStatus, HealthTargetId, LndChannelState,
-    LndChannelSummaryState, LndNodeState, Observation, ObservationBatch, ObservationContext,
-    ObservationOrigin, ObservationSource, ProbeResult, ProbeWindow, StateObservation,
+    HealthCheckObservation, HealthStatus, HealthTargetId, LndChannelState, LndChannelSummaryState,
+    LndNodeState, Observation, ObservationBatch, ObservationContext, ObservationOrigin,
+    ObservationSource, ProbeResult, ProbeWindow, StateObservation,
 };
 use crate::shared::types::{EntityRef, LndChannelId, LndNodeId, ObservationBatchId, SidecarId};
 
@@ -317,36 +317,6 @@ impl LndGrpcPollingCollector {
                 error: CollectionError { kind, message },
             },
         )
-    }
-}
-
-async fn timed<F: std::future::Future>(
-    future: F,
-) -> (chrono::DateTime<Utc>, chrono::DateTime<Utc>, F::Output) {
-    let start = Utc::now();
-    let result = future.await;
-    let end = Utc::now();
-    (start, end, result)
-}
-
-fn empty_attrs() -> Attributes {
-    Attributes(BTreeMap::new())
-}
-
-fn safe_probe_window(
-    started_at: chrono::DateTime<Utc>,
-    completed_at: chrono::DateTime<Utc>,
-) -> ProbeWindow {
-    ProbeWindow::new(started_at, completed_at)
-        .unwrap_or_else(|_| ProbeWindow::new(completed_at, completed_at).unwrap())
-}
-
-fn duration_ms(from: chrono::DateTime<Utc>, to: chrono::DateTime<Utc>) -> Option<u64> {
-    let ms = (to - from).num_milliseconds();
-    if ms < 0 {
-        None
-    } else {
-        Some(ms as u64)
     }
 }
 
