@@ -22,3 +22,15 @@ name = "bitcoin.tip_lag_or_ibd_stalled"
 allowed_subjects = ["BitcoinNode"]
 allows_dimension = false
 min_open_confidence = "High"
+
+[[kinds]]
+name = "lnd.channel_inactive"
+allowed_subjects = ["LndChannel"]
+allows_dimension = false
+min_open_confidence = "Medium"
+
+[[kinds]]
+name = "lnd.chain_backend_lag"
+allowed_subjects = ["LndNode"]
+allows_dimension = false
+min_open_confidence = "High"
