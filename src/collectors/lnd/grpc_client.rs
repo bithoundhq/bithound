@@ -73,10 +73,7 @@ pub enum BuildError {
 #[derive(Debug, Error)]
 pub enum LndRpcError {
     #[error("tonic status: code={code:?} message={message:?}")]
-    Status {
-        code: tonic::Code,
-        message: String,
-    },
+    Status { code: tonic::Code, message: String },
     #[error("transport error: {0}")]
     Transport(#[from] tonic::transport::Error),
     #[error("response decode failed: {0}")]

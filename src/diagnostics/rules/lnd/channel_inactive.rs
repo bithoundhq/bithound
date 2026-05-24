@@ -90,17 +90,16 @@ impl DiagnosticRule for LndChannelInactiveRule {
         // Look up the latest LndChannel state. If we have no
         // observation, there's nothing to evaluate (the polling
         // collector hasn't reported on this channel yet).
-        let channel_state =
-            match ctx
-                .state
-                .latest_state(ctx.subject, &StateName::from_well_known(LND_CHANNEL_DETAIL))
-            {
-                Some(snapshot) => match snapshot.value {
-                    StateObservation::LndChannel(c) => c,
-                    _ => return Ok(vec![]),
-                },
-                None => return Ok(vec![]),
-            };
+        let channel_state = match ctx
+            .state
+            .latest_state(ctx.subject, &StateName::from_well_known(LND_CHANNEL_DETAIL))
+        {
+            Some(snapshot) => match snapshot.value {
+                StateObservation::LndChannel(c) => c,
+                _ => return Ok(vec![]),
+            },
+            None => return Ok(vec![]),
+        };
 
         let mut guard = lock_state(&self.state);
         prune_stale(&mut guard, ctx.monotonic_now);

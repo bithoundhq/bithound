@@ -136,9 +136,7 @@ impl DiagnosticRule for LndChainBackendLagRule {
         };
 
         // bitcoind ahead of LND by > threshold = lag condition.
-        let lagged = bitcoind_height
-            .saturating_sub(lnd_height)
-            > self.lag_blocks_threshold;
+        let lagged = bitcoind_height.saturating_sub(lnd_height) > self.lag_blocks_threshold;
 
         let mut guard = lock_state(&self.state);
         prune_stale(&mut guard, ctx.monotonic_now);

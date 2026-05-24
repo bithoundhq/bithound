@@ -22,17 +22,13 @@ use super::grpc_client::{BuildError as ClientBuildError, LndGrpcClient, LndRpcEr
 use super::lnrpc::{Channel, GetInfoResponse, ListChannelsResponse, ListPeersResponse};
 use crate::collectors::registry::LndNodeConnection;
 use crate::collectors::traits::PollingCollector;
-use crate::collectors::{
-    CollectionContext, CollectionError, CollectorDescriptor, CollectorTarget,
-};
+use crate::collectors::{CollectionContext, CollectionError, CollectorDescriptor, CollectorTarget};
 use crate::observations::{
     Attributes, HealthCheckObservation, HealthStatus, HealthTargetId, LndChannelState,
     LndChannelSummaryState, LndNodeState, Observation, ObservationBatch, ObservationContext,
     ObservationOrigin, ObservationSource, ProbeResult, ProbeWindow, StateObservation,
 };
-use crate::shared::types::{
-    EntityRef, LndChannelId, LndNodeId, ObservationBatchId, SidecarId,
-};
+use crate::shared::types::{EntityRef, LndChannelId, LndNodeId, ObservationBatchId, SidecarId};
 
 #[derive(Debug, Clone)]
 pub struct LndGrpcPollingCollectorConfig {
