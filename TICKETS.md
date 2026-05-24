@@ -124,21 +124,23 @@ when the D-cluster issues were created:
 | BTH-56 | #69          |
 | BTH-57 | #70          |
 | BTH-58 | #71          |
-| BTH-59 | TBD          |
-| BTH-60 | TBD          |
-| BTH-61 | TBD          |
-| BTH-62 | TBD          |
-| BTH-63 | TBD          |
-| BTH-64 | TBD          |
-| BTH-65 | TBD          |
-| BTH-66 | TBD          |
-| BTH-67 | TBD          |
-| BTH-68 | TBD          |
+| BTH-59 | #112         |
+| BTH-60 | #113         |
+| BTH-61 | #114         |
+| BTH-62 | #115         |
+| BTH-63 | #116         |
+| BTH-64 | #117         |
+| BTH-65 | #118         |
+| BTH-66 | #119         |
+| BTH-67 | #120         |
+| BTH-68 | #121         |
 
 (PRs #58–#62 consumed the matching numbers when ADR-D4 docs / BTH-7 /
 BTH-8 / BTH-4-recover / CLAUDE.md-gotcha landed. PR #66 consumed when
-ADR-P3 docs landed. BTH-59..68 issue numbers fill in after creation
-on this branch.)
+ADR-P3 docs landed. PRs #72–#109 consumed the matching numbers
+through Phase A. PR #110 (ADR-E1/C4-defer) and PR #111 (these V0.8
+tickets) consumed those numbers; BTH-59..68 land at issues
+#112–#121.)
 
 Issue bodies use the GitHub numbers (e.g. "Blocked by: #49 (BTH-42)")
 so cross-references resolve via GitHub autolinking.
