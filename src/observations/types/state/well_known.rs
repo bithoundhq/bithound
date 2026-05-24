@@ -1,6 +1,6 @@
 //! Canonical `StateName` string constants, one per `StateObservation` variant.
 //!
-//! Per ADR-R1 §R1.2. The values here are the strings rules pass to
+//! The values here are the strings rules pass to
 //! [`crate::read_models::traits::state::StateReadModel::latest_state`] when
 //! they want the latest state of a given kind. A parity unit test in
 //! `state.rs` asserts that every variant of [`super::StateObservation`]

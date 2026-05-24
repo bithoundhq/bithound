@@ -23,8 +23,8 @@ pub enum StateObservation {
 
 impl StateObservation {
     /// Canonical name for this variant. Used by the read-model store
-    /// (per ADR-R1 §R1.2) to key the generic `latest_state(subject, name)`
-    /// query, and by collectors that emit state observations.
+    /// to key the generic `latest_state(subject, name)` query, and
+    /// by collectors that emit state observations.
     ///
     /// The arms here MUST stay in sync with `well_known::*`. A unit test
     /// asserts parity; adding a variant without updating both will fail
@@ -48,8 +48,7 @@ impl StateObservation {
 ///
 /// Constructed only through [`StateName::parse`] or
 /// [`StateName::from_well_known`]; the inner field is private so
-/// callers can't bypass validation by wrapping arbitrary strings (per
-/// ADR-D2).
+/// callers can't bypass validation by wrapping arbitrary strings.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct StateName(String);
@@ -214,15 +213,15 @@ pub struct LndChannelState {
     /// pending or unannounced channels. Informational only; channel
     /// identity uses `LndChannelId` (the funding outpoint).
     pub short_channel_id: Option<String>,
-    /// Derived at poll time by the LND polling collector
-    /// (ADR-E2 § E2.5) by cross-referencing the channel's
-    /// `remote_pubkey` against the same poll tick's `ListPeers`
-    /// response. `Some(true)`/`Some(false)` when the cross-reference
-    /// succeeds; `None` when it can't be made (e.g. `ListPeers`
-    /// failed while `ListChannels` succeeded, so the channel
-    /// observation lands as a partial). The B1 rule uses this to
-    /// distinguish "channel inactive because peer offline" (routine)
-    /// from "channel inactive while peer is online" (suspicious).
+    /// Derived at poll time by the LND polling collector by cross-
+    /// referencing the channel's `remote_pubkey` against the same
+    /// poll tick's `ListPeers` response. `Some(true)`/`Some(false)`
+    /// when the cross-reference succeeds; `None` when it can't be
+    /// made (e.g. `ListPeers` failed while `ListChannels` succeeded,
+    /// so the channel observation lands as a partial). The
+    /// `lnd.channel_inactive` rule uses this to distinguish "channel
+    /// inactive because peer offline" (routine) from "channel
+    /// inactive while peer is online" (suspicious).
     pub peer_online: Option<bool>,
 }
 

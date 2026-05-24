@@ -68,7 +68,6 @@ mod tests {
     /// without updating the constants and rules referencing the
     /// missing constant would fail at runtime via
     /// `IncidentKind::from_well_known` rather than at build time.
-    /// Per ADR-E1 §E1.4.
     #[test]
     fn embedded_default_kinds_subset_of_well_known_constants() {
         let registry = KindRegistry::load(None).expect("embedded default kinds load");
