@@ -8,3 +8,4 @@
 //! [`crate::diagnostics::traits::DiagnosticRule`] trait.
 
 pub mod bitcoin;
+pub mod lnd;
