@@ -11,6 +11,9 @@ pub const BITCOIN_NO_PEERS: &str = "bitcoin.no_peers";
 pub const BITCOIN_TIP_LAG_OR_IBD_STALLED: &str = "bitcoin.tip_lag_or_ibd_stalled";
 pub const LND_CHANNEL_INACTIVE: &str = "lnd.channel_inactive";
 pub const LND_CHAIN_BACKEND_LAG: &str = "lnd.chain_backend_lag";
+pub const BITHOUND_LND_UNREACHABLE: &str = "bithound.lnd_unreachable";
+pub const BITHOUND_LND_AUTH_FAILED: &str = "bithound.lnd_auth_failed";
+pub const BITHOUND_LND_TLS_INVALID: &str = "bithound.lnd_tls_invalid";
 
 /// All canonical incident-kind names shipped in the built-in catalog.
 ///
@@ -24,6 +27,9 @@ pub const ALL: &[&str] = &[
     BITCOIN_TIP_LAG_OR_IBD_STALLED,
     LND_CHANNEL_INACTIVE,
     LND_CHAIN_BACKEND_LAG,
+    BITHOUND_LND_UNREACHABLE,
+    BITHOUND_LND_AUTH_FAILED,
+    BITHOUND_LND_TLS_INVALID,
 ];
 
 #[cfg(test)]

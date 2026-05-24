@@ -181,6 +181,7 @@ fn parse_entry(
 
 fn parse_subject_kind(name: &str) -> Result<EntitySubjectKind, RegistryError> {
     match name {
+        "Sidecar" => Ok(EntitySubjectKind::Sidecar),
         "Host" => Ok(EntitySubjectKind::Host),
         "BitcoinNode" => Ok(EntitySubjectKind::BitcoinNode),
         "BitcoinPeer" => Ok(EntitySubjectKind::BitcoinPeer),
