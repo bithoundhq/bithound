@@ -1,2 +1,6 @@
 /target
 /docs/build
+
+# macOS filesystem metadata
+.DS_Store
+**/.DS_Store
