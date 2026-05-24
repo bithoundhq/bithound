@@ -13,6 +13,9 @@ pub const BITCOIN_PEER_SUMMARY: &str = "bitcoin.peer_summary";
 pub const LND_NODE: &str = "lnd.node";
 pub const LND_WALLET: &str = "lnd.wallet";
 pub const LND_CHANNEL_SUMMARY: &str = "lnd.channel_summary";
+/// Per-instance channel state (each observation describes one channel).
+/// Distinguished from `LND_CHANNEL_SUMMARY` which is aggregate counts.
+pub const LND_CHANNEL_DETAIL: &str = "lnd.channel_detail";
 pub const HOST_SYSTEM: &str = "host.system";
 
 /// Every canonical state name, used by parity tests and by future
@@ -25,5 +28,6 @@ pub const ALL: &[&str] = &[
     LND_NODE,
     LND_WALLET,
     LND_CHANNEL_SUMMARY,
+    LND_CHANNEL_DETAIL,
     HOST_SYSTEM,
 ];
