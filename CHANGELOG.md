@@ -13,6 +13,18 @@ mock bitcoind, plus a refreshed README and a new operator guide.
 
 ## [Unreleased]
 
+## [0.0.7.1] - 2026-05-24
+
+### Changed
+
+- **Docs: alpha / experimental status banner.** Added a prominent
+  "not production-ready" callout to the top of both `README.md` and
+  the mdBook introduction (`docs/src/README.md`). The runtime,
+  configuration schema, storage layout, notification payloads, and
+  HTTP API are all subject to breaking change until V1.0. Run
+  bithound only in test environments against non-critical
+  infrastructure.
+
 ## [0.0.7.0] - 2026-05-23
 
 ### Added
