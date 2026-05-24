@@ -1,5 +1,14 @@
 # Bithound
 
+> **Status: Alpha / Experimental — not production-ready.**
+> Bithound is in early alpha. The runtime, configuration schema,
+> storage layout, notification payloads, and HTTP API are all subject
+> to breaking change without notice. Expect incomplete features,
+> rough edges, and bugs. Run it only in test environments against
+> non-critical infrastructure. Do not rely on it as your primary
+> alerting path. The first stable target is **V1.0**; see the
+> roadmap in the project [README](https://github.com/bithoundhq/bithound#roadmap).
+
 Bithound is an observability sidecar for Bitcoin infrastructure. It
 runs next to a Bitcoin node, polls it on a fixed interval, evaluates
 diagnostic rules against the observed state, and notifies the
