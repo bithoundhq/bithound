@@ -3,19 +3,20 @@
 //! are NOT shared across multiple LND endpoints the way the Bitcoin
 //! `reqwest::Client` is shared.
 //!
-//! Per ADR-E2:
-//! - **TLS** (§E2.6): trusts ONLY the configured LND cert; native
-//!   roots are deliberately off.
-//! - **Macaroon** (§E2.7): hex-encoded at construction; attached as
-//!   the `macaroon` metadata header on every request. No interceptor
+//! Contract:
+//! - **TLS**: trusts ONLY the configured LND cert; native roots are
+//!   deliberately off (LND's self-signed cert is the norm; trusting
+//!   public CAs adds no value and adds a MITM-via-compromised-CA
+//!   risk).
+//! - **Macaroon**: hex-encoded at construction; attached as the
+//!   `macaroon` metadata header on every request. No interceptor
 //!   for v0.8.
-//! - **Timeout** (§E2.8): each RPC wrapped in `tokio::time::timeout`
-//!   (default 5s, matches ADR-C3 §C3.7).
+//! - **Timeout**: each RPC wrapped in `tokio::time::timeout`
+//!   (default 5s).
 //! - **Startup-failure policy**: missing/malformed TLS cert at
 //!   construction is a `BuildError` (sidecar aborts). LND unreachable
-//!   at first poll is `ProbeResult::Failed` (matches Bitcoin pattern
-//!   from ADR-C3 §C3.5) — `.connect_lazy()` defers the actual dial
-//!   until the first RPC.
+//!   at first poll is `ProbeResult::Failed` — `.connect_lazy()`
+//!   defers the actual dial until the first RPC.
 
 use std::sync::Once;
 use std::time::Duration;
@@ -94,11 +95,38 @@ impl From<tonic::Status> for LndRpcError {
     }
 }
 
+impl LndRpcError {
+    /// Maps the gRPC-side error into the collector's domain-agnostic
+    /// `CollectionErrorKind`.
+    pub fn collection_error_kind(&self) -> crate::collectors::CollectionErrorKind {
+        use crate::collectors::CollectionErrorKind as K;
+        use tonic::Code;
+        match self {
+            LndRpcError::Timeout(_) => K::Timeout,
+            LndRpcError::Decode(_) => K::DecodeError,
+            LndRpcError::MacaroonInvalid => K::Misconfigured,
+            LndRpcError::Transport(_) => K::Unreachable,
+            LndRpcError::Status { code, .. } => match code {
+                Code::Unavailable => K::Unreachable,
+                Code::DeadlineExceeded => K::Timeout,
+                Code::Unauthenticated => K::AuthenticationFailed,
+                Code::PermissionDenied => K::PermissionDenied,
+                Code::FailedPrecondition => K::Misconfigured,
+                Code::Internal => K::Internal,
+                Code::Unimplemented => K::UnsupportedVersion,
+                Code::ResourceExhausted => K::RateLimited,
+                Code::InvalidArgument => K::InvalidResponse,
+                _ => K::Internal,
+            },
+        }
+    }
+}
+
 impl LndGrpcClient {
     /// Validates endpoint shape, reads + parses the TLS cert, and
-    /// hex-encodes the macaroon. **Does not hit the network** (per
-    /// ADR-C3 §C3.5). The channel is built with `.connect_lazy()`;
-    /// the first RPC triggers the actual dial.
+    /// hex-encodes the macaroon. **Does not hit the network.** The
+    /// channel is built with `.connect_lazy()`; the first RPC
+    /// triggers the actual dial.
     pub fn new(
         endpoint: String,
         tls_cert_path: String,
@@ -231,9 +259,8 @@ mod tests {
     }
 
     /// Validates that a missing TLS cert file aborts construction
-    /// with `TlsCertRead`. This is the ADR-E2 §E2.3 startup-failure
-    /// policy: config bugs are loud at startup, not silent runtime
-    /// failures.
+    /// with `TlsCertRead`. Startup-failure policy: config bugs are
+    /// loud at startup, not silent runtime failures.
     #[test]
     fn new_rejects_missing_tls_cert_file() {
         let err = LndGrpcClient::new(

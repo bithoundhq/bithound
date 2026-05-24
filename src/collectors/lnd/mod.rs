@@ -2,9 +2,10 @@
 //!
 //! V0.8 ships the polling collector (`grpc_poll.rs`) and its thin
 //! client wrapper (`grpc_client.rs`). Subscription streams defer to
-//! V1.0 via ADR-E3.
+//! V1.0.
 
 pub mod grpc_client;
+pub mod grpc_poll;
 
 /// Generated tonic types from the vendored `lightning.proto`.
 ///
