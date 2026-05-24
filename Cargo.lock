@@ -272,6 +272,7 @@ dependencies = [
  "prost",
  "rand 0.9.4",
  "reqwest 0.13.3",
+ "rustls",
  "rustls-pemfile",
  "secrecy",
  "serde",
