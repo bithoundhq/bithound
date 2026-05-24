@@ -32,6 +32,14 @@ use crate::shared::types::{BitcoinNodeId, EntityRef};
 const DEFAULT_LAG_BLOCKS_THRESHOLD: u64 = 2;
 const DEFAULT_LAG_PERSIST: Duration = Duration::from_secs(60);
 const STATE_RETENTION: Duration = Duration::from_secs(60 * 60);
+/// Cap for how long an `active_emitted=true` entry sticks around
+/// without a fresh touch. If both correlation sources stop reporting
+/// for a day, we'd rather drop the in-memory bookkeeping than pin it.
+const ACTIVE_EMITTED_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+/// If either correlation snapshot is older than this when the rule
+/// fires, skip emitting. Comparing stale heights produces phantom
+/// lag drafts when one collector temporarily stops reporting.
+const DEFAULT_MAX_STATE_AGE: chrono::Duration = chrono::Duration::seconds(90);
 
 #[derive(Debug, Default)]
 struct SubjectState {
@@ -88,29 +96,42 @@ impl DiagnosticRule for LndChainBackendLagRule {
             return Ok(vec![]);
         }
 
-        // Pull LND's view of the chain tip.
+        // Pull LND's view of the chain tip. Skip if the snapshot is
+        // stale — comparing a fresh bitcoind height against a stale
+        // LND height fabricates lag drafts when the LND collector
+        // pauses (Unreachable, auth flap, etc.).
         let lnd_height = match ctx
             .state
             .latest_state(ctx.subject, &StateName::from_well_known(LND_NODE))
         {
-            Some(snapshot) => match snapshot.value {
-                StateObservation::LndNode(s) => s.block_height,
-                _ => return Ok(vec![]),
-            },
+            Some(snapshot) => {
+                if ctx.now.signed_duration_since(snapshot.observed_at) > DEFAULT_MAX_STATE_AGE {
+                    return Ok(vec![]);
+                }
+                match snapshot.value {
+                    StateObservation::LndNode(s) => s.block_height,
+                    _ => return Ok(vec![]),
+                }
+            }
             None => return Ok(vec![]),
         };
 
         // Pull bitcoind's view of the chain tip from the correlation
-        // target.
+        // target. Same staleness gate as the LND side.
         let bitcoind_subject = EntityRef::BitcoinNode(self.correlation_target.clone());
         let bitcoind_height = match ctx.state.latest_state(
             &bitcoind_subject,
             &StateName::from_well_known(BITCOIN_BLOCKCHAIN),
         ) {
-            Some(snapshot) => match snapshot.value {
-                StateObservation::BitcoinBlockchain(s) => s.blocks,
-                _ => return Ok(vec![]),
-            },
+            Some(snapshot) => {
+                if ctx.now.signed_duration_since(snapshot.observed_at) > DEFAULT_MAX_STATE_AGE {
+                    return Ok(vec![]);
+                }
+                match snapshot.value {
+                    StateObservation::BitcoinBlockchain(s) => s.blocks,
+                    _ => return Ok(vec![]),
+                }
+            }
             None => return Ok(vec![]),
         };
 
@@ -176,11 +197,13 @@ fn lock_state(
 
 fn prune_stale(state: &mut HashMap<EntityRef, SubjectState>, now: Instant) {
     state.retain(|_, entry| {
-        if entry.active_emitted {
-            return true;
-        }
+        let retention = if entry.active_emitted {
+            ACTIVE_EMITTED_TTL
+        } else {
+            STATE_RETENTION
+        };
         match entry.last_touched_at {
-            Some(ts) => now.saturating_duration_since(ts) < STATE_RETENTION,
+            Some(ts) => now.saturating_duration_since(ts) < retention,
             None => true,
         }
     });

@@ -47,8 +47,9 @@ use super::lnrpc::{
 pub struct LndGrpcClient {
     channel: Channel,
     /// Macaroon hex-encoded at construction; stamped on every request
-    /// as the `macaroon` metadata header.
-    macaroon_hex: String,
+    /// as the `macaroon` metadata header. Held as `SecretString` so it
+    /// is redacted in `Debug` output and zeroized on drop.
+    macaroon_hex: SecretString,
     timeout: Duration,
 }
 
@@ -155,18 +156,18 @@ impl LndGrpcClient {
             .map_err(BuildError::TlsConfig)?
             .connect_lazy();
 
-        let macaroon_hex = hex::encode(macaroon.expose_secret().as_bytes());
+        let macaroon_hex_plain = hex::encode(macaroon.expose_secret().as_bytes());
         // Sanity-check that the hex parses as a metadata value; the
         // failure mode is impossible in practice (hex alphabet is a
         // subset of HTTP token chars) but the explicit check makes
         // the contract obvious.
-        let _: MetadataValue<_> = macaroon_hex
+        let _: MetadataValue<_> = macaroon_hex_plain
             .parse()
             .map_err(|_| BuildError::MacaroonInvalid)?;
 
         Ok(Self {
             channel,
-            macaroon_hex,
+            macaroon_hex: SecretString::from(macaroon_hex_plain),
             timeout,
         })
     }
@@ -228,6 +229,7 @@ impl LndGrpcClient {
     fn stamp_macaroon<T>(&self, request: &mut tonic::Request<T>) -> Result<(), LndRpcError> {
         let value: MetadataValue<_> = self
             .macaroon_hex
+            .expose_secret()
             .parse()
             .map_err(|_| LndRpcError::MacaroonInvalid)?;
         request.metadata_mut().insert("macaroon", value);

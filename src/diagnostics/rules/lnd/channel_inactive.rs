@@ -32,6 +32,11 @@ use crate::shared::types::EntityRef;
 const DEFAULT_PUBLIC_DEBOUNCE: Duration = Duration::from_secs(5 * 60);
 const DEFAULT_PRIVATE_DEBOUNCE: Duration = Duration::from_secs(30 * 60);
 const STATE_RETENTION: Duration = Duration::from_secs(60 * 60);
+/// Cap for how long an `active_emitted=true` entry sticks around
+/// without a fresh touch. A channel that has been gone from
+/// `ListChannels` output for a day is almost certainly closed; without
+/// this cap the entry pins the slot in `state` forever.
+const ACTIVE_EMITTED_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Debug, Default)]
 struct SubjectState {
@@ -185,11 +190,13 @@ fn lock_state(
 
 fn prune_stale(state: &mut HashMap<EntityRef, SubjectState>, now: Instant) {
     state.retain(|_, entry| {
-        if entry.active_emitted {
-            return true;
-        }
+        let retention = if entry.active_emitted {
+            ACTIVE_EMITTED_TTL
+        } else {
+            STATE_RETENTION
+        };
         match entry.last_touched_at {
-            Some(ts) => now.saturating_duration_since(ts) < STATE_RETENTION,
+            Some(ts) => now.saturating_duration_since(ts) < retention,
             None => true,
         }
     });

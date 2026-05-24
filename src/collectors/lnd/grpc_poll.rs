@@ -11,7 +11,7 @@
 //! failure preservation.
 
 use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -189,9 +189,9 @@ impl PollingCollector for LndGrpcPollingCollector {
         // chaining await points.
         let (lp_s, lp_e, lp_result) = lp;
         let list_peers_failed = lp_result.is_err();
-        let peers_online_by_pubkey: HashMap<String, bool> = match &lp_result {
-            Ok(resp) => peer_online_map(resp),
-            Err(_) => HashMap::new(),
+        let connected_peer_pubkeys: HashSet<String> = match &lp_result {
+            Ok(resp) => connected_peer_set(resp),
+            Err(_) => HashSet::new(),
         };
 
         // ListChannels
@@ -205,16 +205,18 @@ impl PollingCollector for LndGrpcPollingCollector {
                 ));
 
                 for channel in &resp.channels {
+                    // Skip channels without a funding outpoint. LND
+                    // returns empty `channel_point` for transient
+                    // pending states; the EntityRef would be ambiguous
+                    // and downstream rules can't key off it.
+                    if channel.channel_point.is_empty() {
+                        continue;
+                    }
                     let channel_id = LndChannelId(channel.channel_point.clone());
                     let peer_online = if list_peers_failed {
                         None
                     } else {
-                        Some(
-                            peers_online_by_pubkey
-                                .get(&channel.remote_pubkey)
-                                .copied()
-                                .unwrap_or(false),
-                        )
+                        Some(connected_peer_pubkeys.contains(&channel.remote_pubkey))
                     };
                     partials.push(Observation::state(
                         self.obs_context_for_channel(&ctx.sidecar_id, channel_id, s),
@@ -431,8 +433,8 @@ fn channel_state_from(channel: &Channel, peer_online: Option<bool>) -> LndChanne
     }
 }
 
-fn peer_online_map(resp: &ListPeersResponse) -> HashMap<String, bool> {
-    resp.peers.iter().map(|p| (p.pub_key.clone(), true)).collect()
+fn connected_peer_set(resp: &ListPeersResponse) -> HashSet<String> {
+    resp.peers.iter().map(|p| p.pub_key.clone()).collect()
 }
 
 pub const HEALTH_GET_INFO: &str = "lnd.rpc.get_info";
