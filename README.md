@@ -200,7 +200,7 @@ docs/
 ├── INCIDENT_CATALOG.md   ~17 documented incident patterns (the diagnostic backlog)
 └── OPERATOR_GUIDE.md     Operator-facing how-to for the V0 sidecar
 IMPLEMENTATION_PLAN.md    Phases, milestones, dependency graph, estimates
-TICKETS.md                JIRA-style tickets BTH-1 … BTH-58
+TICKETS.md                JIRA-style tickets BTH-1 … BTH-69
 examples/                 Copyable sample configs
 src/                      Rust crate
 tests/                    End-to-end integration tests (#[ignore]-gated)

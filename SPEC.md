@@ -3,9 +3,9 @@
 > **Companion documents.**
 > - `IMPLEMENTATION_PLAN.md` — phases, milestones, dependency graph,
 >   parallelization-friendly subsets, and per-ticket estimates.
-> - `TICKETS.md` — 41 JIRA-style tickets (BTH-1 … BTH-41) implementing
->   every ADR in this spec. Each ticket lists its ADR references,
->   acceptance criteria, and blocking dependencies.
+> - `TICKETS.md` — JIRA-style tickets (BTH-1 … BTH-69 and growing)
+>   implementing every ADR in this spec. Each ticket lists its ADR
+>   references, acceptance criteria, and blocking dependencies.
 >
 > Use `SPEC.md` to understand **what** Bithound is and **why** every
 > decision was made; use `IMPLEMENTATION_PLAN.md` and `TICKETS.md` to
