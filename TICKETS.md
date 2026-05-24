@@ -74,6 +74,16 @@ Estimate {S = ½–1 day, M = 1–2 days, L = 3–5 days}.
 | BTH-56| axum HTTP server bootstrap + graceful shutdown (ADR-A1) | A | S |
 | BTH-57| V0 operator API endpoints (`/health`, `/incidents/open`, `/incidents/:id`, `/incidents/:id/evidence`) | A | M |
 | BTH-58| `BitcoinRpcUnreachableRule` + `bitcoin.rpc_unreachable` kind | 11 | S |
+| BTH-59| Vendor LND `.proto` files + tonic/prost/tonic-build deps + `build.rs` | V0.8 | L |
+| BTH-60| `StateObservation::LndChannel(LndChannelState)` + `lnd.channel_detail` constant + parity | V0.8 | S |
+| BTH-61| `lnd.channel_inactive` + `lnd.chain_backend_lag` kinds + bidirectional parity test | V0.8 | S |
+| BTH-62| `LndGrpcClient` (tonic + macaroon header + LND-cert-only TLS + error mapping) | V0.8 | M |
+| BTH-63| `LndGrpcPollingCollector` (`impl PollingCollector`, `peer_online` cross-reference) | V0.8 | M |
+| BTH-64| `LndChannelInactiveRule` (catalog B1) | V0.8 | M |
+| BTH-65| `LndChainBackendLagRule` (catalog B6) | V0.8 | M |
+| BTH-66| `bithound.lnd_*` internal incident kinds (operability) | V0.8 | S |
+| BTH-67| End-to-end test for B1 + B6 via Polar regtest | V0.8 | L |
+| BTH-68| v0.0.8.0 docs refresh + CHANGELOG + VERSION bump + catalog status flips | V0.8 | S |
 
 **Re-scopes from D-cluster (ADR-D4 supersedes ADR-L4 §L4.2):**
 - BTH-17 — was "IncidentCommand + HandleOutcome + EngineError"; now defines `IncidentEvent` (no `HandleOutcome`).
@@ -114,10 +124,23 @@ when the D-cluster issues were created:
 | BTH-56 | #69          |
 | BTH-57 | #70          |
 | BTH-58 | #71          |
+| BTH-59 | #112         |
+| BTH-60 | #113         |
+| BTH-61 | #114         |
+| BTH-62 | #115         |
+| BTH-63 | #116         |
+| BTH-64 | #117         |
+| BTH-65 | #118         |
+| BTH-66 | #119         |
+| BTH-67 | #120         |
+| BTH-68 | #121         |
 
 (PRs #58–#62 consumed the matching numbers when ADR-D4 docs / BTH-7 /
 BTH-8 / BTH-4-recover / CLAUDE.md-gotcha landed. PR #66 consumed when
-ADR-P3 docs landed.)
+ADR-P3 docs landed. PRs #72–#109 consumed the matching numbers
+through Phase A. PR #110 (ADR-E1/C4-defer) and PR #111 (these V0.8
+tickets) consumed those numbers; BTH-59..68 land at issues
+#112–#121.)
 
 Issue bodies use the GitHub numbers (e.g. "Blocked by: #49 (BTH-42)")
 so cross-references resolve via GitHub autolinking.
@@ -2192,3 +2215,423 @@ min_open_confidence = "High"
 - [ ] Subject = `EntityRef::BitcoinNode(node_id)`
 - [ ] Tests covering: all-four-critical → Active; partial-recovery → Cleared; brief outage (<60s) → no draft
 - [ ] `default_kinds.toml` entry added with parity-test pass
+
+---
+
+# Phase V0.8 — LND foundation
+
+## BTH-59: Vendor LND `.proto` files + add `tonic` / `prost` / `tonic-build` deps + `build.rs`
+
+**Type** Task • **Priority** High • **Estimate** L • **Component** build + collectors
+**ADRs** E2 §E2.1 §E2.2 • **Blocked by** — • **Blocks** BTH-62
+
+### Description
+
+First gRPC client in the codebase. Vendor LND's `.proto` files under `src/collectors/lnd/proto/` at a pinned version (initial target: **LND v0.18.5-beta**), add the tonic build chain, and stand up the empty `src/collectors/lnd/` module.
+
+Per ADR-E2 §E2.2 this is **not a one-file copy**. LND's `lightning.proto` imports `google/api/annotations.proto` and `google/api/http.proto` (plus a few sub-service protos); all transitive imports must be vendored under `proto/google/api/` (recommended path) or stripped from a local copy (alternative — creates drift). Budget 2-3 days for chasing imports and validating codegen on the first vendor PR.
+
+Cargo deps added:
+
+```toml
+[build-dependencies]
+tonic-build = "0.12"
+
+[dependencies]
+tonic = { version = "0.12", features = ["tls"] }
+prost = "0.13"
+rustls-pemfile = "2"
+```
+
+`build.rs` at the repo root:
+
+```rust
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("cargo:rerun-if-changed=src/collectors/lnd/proto/lightning.proto");
+    tonic_build::configure()
+        .build_server(false)
+        .build_client(true)
+        .compile_protos(
+            &["src/collectors/lnd/proto/lightning.proto"],
+            &["src/collectors/lnd/proto"],
+        )?;
+    Ok(())
+}
+```
+
+Vendored proto files include an MIT/upstream-license attribution preserved verbatim (LND's license header). `proto/README.md` documents the pinned LND version, the source URL, the vendored set, and the review-on-LND-release cadence.
+
+### Acceptance criteria
+- [ ] `lightning.proto` and transitive `google/api/*` protos vendored under `src/collectors/lnd/proto/`
+- [ ] `proto/README.md` documents pinned LND version + source URL + update cadence
+- [ ] LND license preserved (MIT) and attribution noted
+- [ ] `tonic`, `prost`, `rustls-pemfile`, `tonic-build` added to `Cargo.toml` (no `default-features = false` on tonic)
+- [ ] `build.rs` compiles the protos with `cargo:rerun-if-changed`
+- [ ] `cargo build` succeeds; generated `lnrpc::*` types are importable via `tonic::include_proto!("lnrpc")`
+- [ ] `src/collectors/lnd/mod.rs` exists as `//! LND collectors (gRPC-based).` placeholder; `pub mod lnd;` added to `src/collectors/mod.rs`
+- [ ] No public API change vs main except the new `collectors::lnd` module
+
+---
+
+## BTH-60: `StateObservation::LndChannel(LndChannelState)` + `lnd.channel_detail` state constant + parity tests
+
+**Type** Story • **Priority** High • **Estimate** S • **Component** observations
+**ADRs** E1 §E1.1 (with E2 amendment for `peer_online`) • **Blocked by** — • **Blocks** BTH-63, BTH-64
+
+### Description
+
+Per ADR-E1 §E1.1, add the per-channel state surface the B1 rule (BTH-64) consumes. The struct lives in `src/observations/types/state.rs`:
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LndChannelState {
+    pub remote_pubkey: String,
+    pub capacity_sat: u64,
+    pub local_balance_sat: u64,
+    pub remote_balance_sat: u64,
+    /// Mirror of LND's `lnrpc.Channel.active`. B1 reads as-is.
+    pub active: bool,
+    pub private: bool,
+    pub initiator: bool,
+    pub csv_delay: u32,
+    pub commit_fee_sat: u64,
+    pub lifetime_seconds: u64,
+    pub last_update_height: Option<u64>,
+    /// SCID once gossip-eligible. Informational; identity is the funding outpoint.
+    pub short_channel_id: Option<String>,
+    /// Derived in the collector (BTH-63) by cross-referencing the channel's
+    /// `remote_pubkey` against the same poll tick's `ListPeers` response.
+    /// `None` when the cross-reference can't be made (e.g. ListPeers failed).
+    pub peer_online: Option<bool>,
+}
+```
+
+Add `StateObservation::LndChannel(LndChannelState)` enum variant, update `StateObservation::name()` to return `well_known::LND_CHANNEL_DETAIL`, add `LND_CHANNEL_DETAIL: &str = "lnd.channel_detail"` to `src/observations/types/state/well_known.rs` and to `ALL`. **Channel subject is `EntityRef::LndChannel { node_id, channel_id }`**; `LndChannelId` is the funding outpoint (`"txid:vout"`) for the channel's whole lifecycle (NOT the SCID).
+
+### Acceptance criteria
+- [ ] `LndChannelState` struct added with all fields above
+- [ ] `StateObservation::LndChannel(LndChannelState)` variant added
+- [ ] `StateObservation::name()` returns `LND_CHANNEL_DETAIL` for the variant
+- [ ] `well_known::LND_CHANNEL_DETAIL` constant added and included in `state::well_known::ALL`
+- [ ] Existing parity test `state.rs::parity_variants_match_well_known` passes
+- [ ] Serde round-trip test for the new variant
+- [ ] Doc comments preserve the funding-outpoint-as-identity rationale and the `peer_online` semantics
+
+---
+
+## BTH-61: `lnd.channel_inactive` + `lnd.chain_backend_lag` incident kinds + `default_kinds.toml` entries + bidirectional parity test
+
+**Type** Story • **Priority** High • **Estimate** S • **Component** incidents
+**ADRs** E1 §E1.4 §E1.5 • **Blocked by** — • **Blocks** BTH-64, BTH-65, BTH-66
+
+### Description
+
+Per ADR-E1 §E1.4 §E1.5, register the two V0.8 LND incident kinds.
+
+`src/incidents/well_known.rs`:
+
+```rust
+pub const LND_CHANNEL_INACTIVE: &str = "lnd.channel_inactive";
+pub const LND_CHAIN_BACKEND_LAG: &str = "lnd.chain_backend_lag";
+
+pub const ALL: &[&str] = &[
+    BITCOIN_RPC_UNREACHABLE,
+    BITCOIN_NO_PEERS,
+    BITCOIN_TIP_LAG_OR_IBD_STALLED,
+    LND_CHANNEL_INACTIVE,
+    LND_CHAIN_BACKEND_LAG,
+];
+```
+
+`config/default_kinds.toml` entries:
+
+```toml
+[[kinds]]
+name = "lnd.channel_inactive"
+allowed_subjects = ["LndChannel"]
+allows_dimension = false
+min_open_confidence = "Medium"
+
+[[kinds]]
+name = "lnd.chain_backend_lag"
+allowed_subjects = ["LndNode"]
+allows_dimension = false
+min_open_confidence = "High"
+```
+
+Also lands the **bidirectional parity test** named in ADR-E1 §E1.4: in addition to the existing `embedded_default_kinds_match_well_known_constants` (constants → registry), add an `embedded_default_kinds_subset_of_well_known_constants` test (registry → constants) so a contributor adding a TOML entry without updating `ALL` fails the build.
+
+### Acceptance criteria
+- [ ] `LND_CHANNEL_INACTIVE` and `LND_CHAIN_BACKEND_LAG` constants added and in `ALL`
+- [ ] `default_kinds.toml` entries land with `allowed_subjects` + `allows_dimension` + `min_open_confidence` per ADR-E1 §E1.5
+- [ ] Existing parity test (`constants → TOML`) still passes
+- [ ] **New** parity test (`TOML → constants`) added and passes
+- [ ] `IncidentKind::from_well_known(LND_CHANNEL_INACTIVE)` and `..._CHAIN_BACKEND_LAG` round-trip via the registry
+
+---
+
+# Phase V0.8 — LND client + collector
+
+## BTH-62: `LndGrpcClient` — tonic + macaroon header + LND-cert-only TLS + per-RPC timeout + error mapping
+
+**Type** Story • **Priority** High • **Estimate** M • **Component** collectors
+**ADRs** E2 §E2.3 §E2.6 §E2.7 §E2.8 §E2.9 • **Blocked by** BTH-59 • **Blocks** BTH-63
+
+### Description
+
+Implement `src/collectors/lnd/grpc_client.rs` per ADR-E2 §E2.3. Thin tonic wrapper, one per LND node. Consumes the existing `LndNodeConnection` from `src/collectors/registry.rs` (the macaroon arrives pre-resolved as `SecretString`; only the TLS cert is loaded from disk).
+
+```rust
+pub struct LndGrpcClient {
+    channel: tonic::transport::Channel,
+    macaroon_hex: String,
+    timeout: Duration,
+}
+
+pub enum BuildError {
+    TlsCertRead { path: String, source: std::io::Error },
+    TlsCertParse { path: String },
+    MissingScheme { endpoint: String },
+    InvalidEndpoint { endpoint: String, source: tonic::transport::Error },
+    TlsConfig(tonic::transport::Error),
+    MacaroonInvalid,
+}
+
+impl LndGrpcClient {
+    pub fn new(
+        endpoint: String,
+        tls_cert_path: String,
+        macaroon: &SecretString,
+        timeout: Duration,
+    ) -> Result<Self, BuildError>;
+
+    pub async fn get_info(&self) -> Result<GetInfoResponse, LndRpcError>;
+    pub async fn list_channels(&self) -> Result<ListChannelsResponse, LndRpcError>;
+    pub async fn list_peers(&self) -> Result<ListPeersResponse, LndRpcError>;
+}
+```
+
+**TLS:** load the configured LND cert via `rustls-pemfile`, build `ClientTlsConfig::new().ca_certificate(...)`. **Do NOT** enable tonic's `tls-roots` / `tls-webpki-roots` features. **No native roots.** Endpoint must include `https://` scheme or `BuildError::MissingScheme`.
+
+**Macaroon:** hex-encode at construction; attach as `macaroon` metadata header per-request (no interceptor for V0.8).
+
+**Timeout:** each RPC wrapped in `tokio::time::timeout(self.timeout, ...)` (default 5s, matches ADR-C3 §C3.7).
+
+**`LndRpcError`** carries `Status(tonic::Code, String)`, `Transport(...)`, `Decode(#[from] prost::DecodeError)`, `Timeout(Duration)`.
+
+**Startup-failure policy:** missing/malformed TLS cert at construction = `BuildError` (sidecar abort). LND unreachable at first poll = `ProbeResult::Failed` (matches Bitcoin pattern from ADR-C3 §C3.5). `Channel::from_shared(...).tls_config(...).connect_lazy()` is the construction shape.
+
+### Acceptance criteria
+- [ ] `LndGrpcClient::new` builds a `tonic::Channel` with `.connect_lazy()` (no network call at construction)
+- [ ] TLS uses **only** the configured LND cert; native root features remain disabled
+- [ ] Macaroon attached as `macaroon` metadata header on every request
+- [ ] All three RPC methods present with per-request timeout
+- [ ] `BuildError::MissingScheme` covers endpoints without `https://`
+- [ ] `LndRpcError` includes `Decode(prost::DecodeError)` variant
+- [ ] `tonic::Status → LndRpcError → CollectionErrorKind` mapping table from ADR-E2 §E2.9 applied at the collector boundary in BTH-63
+- [ ] Unit tests: construction fails on bad cert / bad scheme / missing macaroon-as-metadata-value; succeeds with valid inputs
+
+---
+
+## BTH-63: `LndGrpcPollingCollector` — `impl PollingCollector` with parallel RPCs + `peer_online` cross-reference
+
+**Type** Story • **Priority** High • **Estimate** M • **Component** collectors
+**ADRs** E2 §E2.4 §E2.5 §E2.10; C1 §1; C3 §C3.5 §C3.6 • **Blocked by** BTH-60, BTH-62 • **Blocks** BTH-64, BTH-65
+
+### Description
+
+Implement `src/collectors/lnd/grpc_poll.rs` per ADR-E2 §E2.4. Mirrors `BitcoinCoreRpcCollector`: parallel RPCs via `tokio::join!`, deterministic spec-order processing, partials preserved in `ProbeResult::Failed`.
+
+**Three RPCs per poll** (default 30s cadence):
+
+| RPC | Produces |
+|---|---|
+| `GetInfo` | `StateObservation::LndNode(LndNodeState)` |
+| `ListChannels` | `StateObservation::LndChannelSummary` PLUS one `StateObservation::LndChannel` per channel |
+| `ListPeers` | Joined into per-channel observations as `LndChannelState.peer_online` |
+
+**ListPeers cross-reference** (per ADR-E2 §E2.5): for each channel in `ListChannels`, look up the matching peer in `ListPeers` by `remote_pubkey`. Set `peer_online = Some(peer.online)` on success, `Some(false)` if no match, `None` only when ListPeers itself failed (so the channel observation lands as a partial).
+
+**Health observations** per ADR-E2 §E2.10: every successful RPC emits a `HealthCheckObservation { target: "lnd.rpc.<method>", status: Ok, latency_ms }`. Every failed RPC emits the same target with `HealthStatus::Critical` and a `HealthError`.
+
+Subject of channel observations: `EntityRef::LndChannel { node_id, channel_id }` where `channel_id` is the funding outpoint (`txid:vout` from `Channel.channel_point`).
+
+### Acceptance criteria
+- [ ] `impl PollingCollector for LndGrpcPollingCollector` with `tokio::join!` over the three RPCs
+- [ ] Per-channel `LndChannelState` observations emitted with funding-outpoint-derived `LndChannelId`
+- [ ] `peer_online: Some(true|false)` set when ListPeers succeeds, `None` only on ListPeers failure
+- [ ] Health observations `lnd.rpc.get_info`, `lnd.rpc.list_channels`, `lnd.rpc.list_peers` emitted per call
+- [ ] Partial-failure: ListPeers failure preserves channel state observations as partials with `peer_online = None`
+- [ ] `BuildError::WrongTargetKind` if `CollectorTarget` isn't `LndNode`
+- [ ] Construction validates shape only (no network call) per ADR-C3 §C3.5
+- [ ] Tests: all-RPCs-succeed → Ok batch; ListPeers fails → Failed batch with partial LndChannel observations and `peer_online = None`; total failure → Failed batch with health observation carrying the first error
+
+---
+
+# Phase V0.8 — LND rules
+
+## BTH-64: `LndChannelInactiveRule` (catalog B1) + `lnd.channel_inactive` kind binding
+
+**Type** Story • **Priority** High • **Estimate** M • **Component** rules
+**ADRs** E1 §E1.4 §E1.5; L2 §L2.1; INCIDENT_CATALOG.md §B1 • **Blocked by** BTH-61, BTH-63 • **Blocks** BTH-67
+
+### Description
+
+Implement the B1 rule in `src/diagnostics/rules/lnd/channel_inactive.rs`. Reads per-channel state from `StateReadModel::latest_state(EntityRef::LndChannel { node_id, channel_id }, StateName::from_well_known(LND_CHANNEL_DETAIL))`.
+
+**Pattern:**
+- **Active** when `state.active == false` for ≥ `inactive_threshold` continuous seconds. Default thresholds: **5 minutes for non-private channels (`state.private == false`)**, **30 minutes for private channels** (private channels flap more from peer NAT-traversal issues; longer window reduces false positives).
+- **Cleared** when `state.active == true` is observed.
+- Severity gating via `state.peer_online` (set by the BTH-63 collector cross-reference):
+  - `Some(false)` (peer offline → routine cause) → severity `Warning`, confidence `Medium`
+  - `Some(true)` (peer online but channel inactive → suspicious) → severity `Critical`, confidence `High`
+  - `None` (peer status unavailable for this tick) → severity `Warning`, confidence `Medium` (conservative)
+
+Fingerprint: `(EntityRef::LndChannel { node_id, channel_id }, lnd.channel_inactive, None)` — `allows_dimension = false` per BTH-61, the channel_id is already in the subject.
+
+### Acceptance criteria
+- [ ] `DiagnosticRule` impl reading `StateReadModel::latest_state` for `LndChannel`
+- [ ] Active draft emitted after `inactive_threshold` continuous seconds of `active == false`
+- [ ] Cleared draft emitted on first observation of `active == true`
+- [ ] Different default thresholds for private vs non-private channels (5m / 30m)
+- [ ] Severity / confidence gated on `peer_online` per spec above
+- [ ] `kind = IncidentKind::from_well_known(LND_CHANNEL_INACTIVE)`
+- [ ] Tests: short flap (<threshold) → no draft; sustained inactivity → Active; peer-online vs peer-offline severity; recovery → Cleared
+
+---
+
+## BTH-65: `LndChainBackendLagRule` (catalog B6) + `lnd.chain_backend_lag` kind binding
+
+**Type** Story • **Priority** High • **Estimate** M • **Component** rules
+**ADRs** E1 §E1.3 §E1.4 §E1.5; INCIDENT_CATALOG.md §B6 • **Blocked by** BTH-61, BTH-63 • **Blocks** BTH-67
+
+### Description
+
+Implement the B6 rule in `src/diagnostics/rules/lnd/chain_backend_lag.rs`. **Cross-source correlation** between LND's view of the chain tip and bitcoind's.
+
+**Inputs:**
+
+```text
+lnd_height = StateReadModel::latest_state(
+    EntityRef::LndNode(node_id),
+    StateName::from_well_known(LND_NODE),
+)?.block_height;
+
+bitcoind_height = StateReadModel::latest_state(
+    EntityRef::BitcoinNode(bitcoind_id),
+    StateName::from_well_known(BITCOIN_BLOCKCHAIN),
+)?.blocks;
+```
+
+**Detection:**
+- **Active** when `bitcoind_height - lnd_height > lag_blocks_threshold` (default 2 blocks) for `lag_persist_seconds` (default 60 seconds) continuous. Severity `Critical`, confidence `High`.
+- **Cleared** when the lag returns to `≤ 1` block.
+
+**Correlation target:** which bitcoind to correlate against. V0.8 policy per ADR-E1 §E1.3: if the sidecar config has exactly one `BitcoinNodeId`, use it. If multiple, the rule constructor accepts a configured `chain_backend_target_bitcoind_id` (resolved from `[collectors.lnd.nodes.<id>].chain_backend_target_bitcoind_id` per ADR-X1). If not configured and multiple bitcoinds exist, the rule logs a warning and does not fire.
+
+Fingerprint: `(EntityRef::LndNode(node_id), lnd.chain_backend_lag, None)` — `allows_dimension = false` for V0.8.
+
+### Acceptance criteria
+- [ ] `DiagnosticRule` impl reading both `LndNodeState` and `BitcoinBlockchainState`
+- [ ] Default thresholds: `lag_blocks_threshold = 2`, `lag_persist_seconds = 60`
+- [ ] Active draft emitted when criteria sustained; Cleared when difference ≤ 1
+- [ ] Correlation target resolution: single-bitcoind auto-pick; multi-bitcoind via config; otherwise log + skip
+- [ ] `kind = IncidentKind::from_well_known(LND_CHAIN_BACKEND_LAG)`
+- [ ] Tests: lag-then-clear; brief blip (<persist) → no draft; multi-bitcoind unconfigured → no draft (with warning log); LND ahead of bitcoind (bitcoind lagging) → no LND-side draft
+
+---
+
+# Phase V0.8 — operability + e2e + docs
+
+## BTH-66: `bithound.lnd_*` internal incident kinds + `default_kinds.toml` entries
+
+**Type** Task • **Priority** Medium • **Estimate** S • **Component** incidents + operability
+**ADRs** E2 §E2.3 (open follow-on); N1 §N1.5 (Sidecar subject pattern) • **Blocked by** BTH-61 • **Blocks** —
+
+### Description
+
+Register Bithound's own LND-collector incident kinds so operators can distinguish "my LND node is broken" from "Bithound's LND collector is broken." Per ADR-E2 §E2.3, the V0.8 set is:
+
+- `bithound.lnd_unreachable` — gRPC channel connection failures
+- `bithound.lnd_auth_failed` — macaroon rejected by LND
+- `bithound.lnd_tls_invalid` — TLS handshake failure (likely cert mismatch)
+
+No rules consume these in V0.8 — the registry entries land so V0.x rules can emit drafts against them via the existing health-observation surface from BTH-63 (or a future bithound-self diagnostic rule).
+
+`well_known::ALL` additions:
+
+```rust
+pub const BITHOUND_LND_UNREACHABLE: &str = "bithound.lnd_unreachable";
+pub const BITHOUND_LND_AUTH_FAILED: &str = "bithound.lnd_auth_failed";
+pub const BITHOUND_LND_TLS_INVALID: &str = "bithound.lnd_tls_invalid";
+```
+
+`default_kinds.toml` entries — subject = `Sidecar`, dimension = `collector_id` (so a sidecar monitoring multiple LND nodes can fingerprint per-collector).
+
+### Acceptance criteria
+- [ ] Three new well_known constants added and in `ALL`
+- [ ] `default_kinds.toml` entries land with `allowed_subjects = ["Sidecar"]`, `allows_dimension = true`, `dimension_label = "collector_id"`, `min_open_confidence = "High"`
+- [ ] Bidirectional parity test (added in BTH-61) still passes
+- [ ] No rule implementation required (deferred to V0.x when a self-health rule lands)
+
+---
+
+## BTH-67: End-to-end integration test for B1 + B6 via Polar regtest
+
+**Type** Story • **Priority** High • **Estimate** L • **Component** tests
+**ADRs** E1, E2; SPEC.md §test plan • **Blocked by** BTH-64, BTH-65 • **Blocks** BTH-68
+
+### Description
+
+End-to-end acceptance test that boots a regtest Bitcoin + Lightning network via [Polar](https://lightningpolar.com/) (or equivalent docker-compose) and asserts the B1 + B6 lifecycle.
+
+**Setup:**
+- 1 `bitcoind` regtest node
+- 2 LND nodes (`alice`, `bob`) connected to bitcoind
+- 1 channel `alice → bob`
+- 1 Bithound sidecar polling both LND nodes via the BTH-63 collector
+
+**Scenarios:**
+
+1. **B1 channel inactive (peer-offline path):** kill `bob`'s LND container. Wait `> inactive_threshold`. Assert Bithound emits `lnd.channel_inactive` Active with `severity = Warning, confidence = Medium`. Restart bob. Assert Cleared.
+
+2. **B1 channel inactive (peer-online path):** simulate a channel `disable_channel` while peers stay connected (LND's `lncli disablechannel`). Wait `> inactive_threshold`. Assert Active with `severity = Critical, confidence = High`. Re-enable. Assert Cleared.
+
+3. **B6 chain-backend lag:** pause bitcoind temporarily on alice's regtest setup (`pkill -STOP bitcoind`, then `mine N blocks` on a parallel chain — or simpler: cut the gRPC connection from alice to bitcoind via iptables for the test window). Wait `> lag_persist_seconds`. Assert Bithound emits `lnd.chain_backend_lag` Active. Restore connectivity. Assert Cleared.
+
+Polar config committed under `tests/v0_8/polar/`. Test runnable via `cargo test --test e2e_v0_8_lnd -- --ignored` (gated as `#[ignore]` because it's heavyweight; CI runs it on a manual workflow trigger or nightly).
+
+### Acceptance criteria
+- [ ] Polar config (`network.yml` or equivalent) under `tests/v0_8/polar/`
+- [ ] `tests/e2e_v0_8_lnd.rs` with three test functions covering scenarios above
+- [ ] Tests are `#[ignore]`-gated for the default `cargo test` run (matches existing e2e pattern from BTH-40)
+- [ ] README under `tests/v0_8/` documents how to run the e2e locally
+- [ ] All three scenarios pass on a clean Polar boot
+
+---
+
+## BTH-68: v0.0.8.0 docs refresh + CHANGELOG + VERSION bump + INCIDENT_CATALOG.md status flips
+
+**Type** Task • **Priority** Medium • **Estimate** S • **Component** docs + release
+**ADRs** — • **Blocked by** BTH-67 • **Blocks** —
+
+### Description
+
+Close out V0.8:
+
+- Bump `VERSION` to `0.0.8.0`
+- Add v0.0.8.0 entry to `CHANGELOG.md` summarizing the LND-first wedge (B1 + B6 implemented, LND polling collector via gRPC, ADR-E1 + E2 landed, ADR-C4 deferred to V1.0)
+- Flip B1 and B6 in `docs/INCIDENT_CATALOG.md` to **"Implemented in V0.8"** under "Implemented in V0" section (which gets renamed to "Implemented")
+- Add `[collectors.lnd]` shape to `docs/src/reference/config-schema.md` (mirroring `[collectors.bitcoin_core]`'s existing documentation)
+- Update `docs/src/operator/install.md` with a "Configuring LND" section (TLS cert path, macaroon path, polling interval)
+- Update `docs/src/operator/incident-catalog.md` to surface the two new LND kinds with operator-facing descriptions
+- mdBook builds cleanly
+
+### Acceptance criteria
+- [ ] `VERSION` = `0.0.8.0`
+- [ ] `CHANGELOG.md` has a v0.0.8.0 section
+- [ ] `INCIDENT_CATALOG.md` B1 and B6 marked Implemented; "Implemented in V0" heading widened
+- [ ] `docs/src/reference/config-schema.md` documents `[collectors.lnd]`
+- [ ] `docs/src/operator/install.md` has an LND configuration section
+- [ ] `docs/src/operator/incident-catalog.md` covers `lnd.channel_inactive` and `lnd.chain_backend_lag`
+- [ ] `mdbook build docs/` succeeds with no warnings
