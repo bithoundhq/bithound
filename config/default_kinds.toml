@@ -22,3 +22,43 @@ name = "bitcoin.tip_lag_or_ibd_stalled"
 allowed_subjects = ["BitcoinNode"]
 allows_dimension = false
 min_open_confidence = "High"
+
+[[kinds]]
+name = "lnd.channel_inactive"
+allowed_subjects = ["LndChannel"]
+allows_dimension = false
+min_open_confidence = "Medium"
+
+[[kinds]]
+name = "lnd.chain_backend_lag"
+allowed_subjects = ["LndNode"]
+allows_dimension = false
+min_open_confidence = "High"
+
+# Bithound self-observability: the LND collector's own failure modes.
+# Subject is the sidecar; dimension is the failing collector's ID so
+# operators monitoring multiple LND nodes can tell which one is broken.
+# No rule consumes these yet (ADR-E2 §E2.3 open follow-on); the registry
+# entries land here so future v0.x self-health rules can emit drafts
+# against them without a TOML update.
+
+[[kinds]]
+name = "bithound.lnd_unreachable"
+allowed_subjects = ["Sidecar"]
+allows_dimension = true
+dimension_label = "collector_id"
+min_open_confidence = "High"
+
+[[kinds]]
+name = "bithound.lnd_auth_failed"
+allowed_subjects = ["Sidecar"]
+allows_dimension = true
+dimension_label = "collector_id"
+min_open_confidence = "High"
+
+[[kinds]]
+name = "bithound.lnd_tls_invalid"
+allowed_subjects = ["Sidecar"]
+allows_dimension = true
+dimension_label = "collector_id"
+min_open_confidence = "High"

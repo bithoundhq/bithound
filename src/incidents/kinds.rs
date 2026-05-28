@@ -96,6 +96,14 @@ impl KindRegistry {
         Ok(Self { kinds })
     }
 
+    /// Iterate over every registered `IncidentKind` in the registry,
+    /// including both built-in and user-supplied entries. Used by the
+    /// reverse-direction parity test in `well_known.rs` to ensure
+    /// every TOML entry has a matching constant.
+    pub fn kinds(&self) -> impl Iterator<Item = &IncidentKind> {
+        self.kinds.keys()
+    }
+
     pub fn lookup(&self, kind: &IncidentKind) -> Option<&IncidentKindSpec> {
         self.kinds.get(kind)
     }
@@ -173,6 +181,7 @@ fn parse_entry(
 
 fn parse_subject_kind(name: &str) -> Result<EntitySubjectKind, RegistryError> {
     match name {
+        "Sidecar" => Ok(EntitySubjectKind::Sidecar),
         "Host" => Ok(EntitySubjectKind::Host),
         "BitcoinNode" => Ok(EntitySubjectKind::BitcoinNode),
         "BitcoinPeer" => Ok(EntitySubjectKind::BitcoinPeer),

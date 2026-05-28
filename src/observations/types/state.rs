@@ -16,14 +16,15 @@ pub enum StateObservation {
     LndNode(LndNodeState),
     LndWallet(LndWalletState),
     LndChannelSummary(LndChannelSummaryState),
+    LndChannel(LndChannelState),
 
     Host(HostState),
 }
 
 impl StateObservation {
     /// Canonical name for this variant. Used by the read-model store
-    /// (per ADR-R1 §R1.2) to key the generic `latest_state(subject, name)`
-    /// query, and by collectors that emit state observations.
+    /// to key the generic `latest_state(subject, name)` query, and
+    /// by collectors that emit state observations.
     ///
     /// The arms here MUST stay in sync with `well_known::*`. A unit test
     /// asserts parity; adding a variant without updating both will fail
@@ -37,6 +38,7 @@ impl StateObservation {
             Self::LndNode(_) => well_known::LND_NODE,
             Self::LndWallet(_) => well_known::LND_WALLET,
             Self::LndChannelSummary(_) => well_known::LND_CHANNEL_SUMMARY,
+            Self::LndChannel(_) => well_known::LND_CHANNEL_DETAIL,
             Self::Host(_) => well_known::HOST_SYSTEM,
         })
     }
@@ -46,8 +48,7 @@ impl StateObservation {
 ///
 /// Constructed only through [`StateName::parse`] or
 /// [`StateName::from_well_known`]; the inner field is private so
-/// callers can't bypass validation by wrapping arbitrary strings (per
-/// ADR-D2).
+/// callers can't bypass validation by wrapping arbitrary strings.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct StateName(String);
@@ -179,6 +180,51 @@ pub struct LndChannelSummaryState {
     pub unsettled_balance_sat: Option<u64>,
 }
 
+/// Per-channel state for an LND channel. Subject is
+/// `EntityRef::LndChannel { node_id, channel_id }` where `channel_id`
+/// is the funding outpoint (`"txid:vout"`) — stable across the
+/// channel's whole lifecycle. The short-channel-id is informational
+/// only; it changes form between pending and confirmed and therefore
+/// cannot serve as identity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LndChannelState {
+    /// 33-byte secp256k1 pubkey of the remote node, hex-encoded.
+    pub remote_pubkey: String,
+    pub capacity_sat: u64,
+    pub local_balance_sat: u64,
+    pub remote_balance_sat: u64,
+    /// Mirror of LND's `lnrpc.Channel.active` — `true` when the
+    /// channel is currently usable for routing. The B1
+    /// `lnd.channel_inactive` rule reads this field as-is; no
+    /// re-derivation.
+    pub active: bool,
+    pub private: bool,
+    pub initiator: bool,
+    pub csv_delay: u32,
+    pub commit_fee_sat: u64,
+    /// Seconds since channel open.
+    pub lifetime_seconds: u64,
+    /// Block height at which LND last observed the channel update
+    /// gossip. `None` for brand-new channels with no updates yet.
+    pub last_update_height: Option<u64>,
+    /// Short-channel-id once the funding tx is confirmed enough for
+    /// gossip propagation (LND populates this in
+    /// `lnrpc.Channel.chan_id` after ~6 confirmations). `None` for
+    /// pending or unannounced channels. Informational only; channel
+    /// identity uses `LndChannelId` (the funding outpoint).
+    pub short_channel_id: Option<String>,
+    /// Derived at poll time by the LND polling collector by cross-
+    /// referencing the channel's `remote_pubkey` against the same
+    /// poll tick's `ListPeers` response. `Some(true)`/`Some(false)`
+    /// when the cross-reference succeeds; `None` when it can't be
+    /// made (e.g. `ListPeers` failed while `ListChannels` succeeded,
+    /// so the channel observation lands as a partial). The
+    /// `lnd.channel_inactive` rule uses this to distinguish "channel
+    /// inactive because peer offline" (routine) from "channel
+    /// inactive while peer is online" (suspicious).
+    pub peer_online: Option<bool>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostState {
     pub hostname: Option<String>,
@@ -259,6 +305,21 @@ mod tests {
                 remote_balance_sat: 0,
                 unsettled_balance_sat: None,
             }),
+            StateObservation::LndChannel(LndChannelState {
+                remote_pubkey: String::new(),
+                capacity_sat: 0,
+                local_balance_sat: 0,
+                remote_balance_sat: 0,
+                active: true,
+                private: false,
+                initiator: false,
+                csv_delay: 0,
+                commit_fee_sat: 0,
+                lifetime_seconds: 0,
+                last_update_height: None,
+                short_channel_id: None,
+                peer_online: None,
+            }),
             StateObservation::Host(HostState {
                 hostname: None,
                 os: None,
@@ -313,7 +374,7 @@ mod tests {
 
     #[test]
     fn name_returns_expected_string_per_variant() {
-        let cases: [(StateObservation, &str); 8] = [
+        let cases: [(StateObservation, &str); 9] = [
             (
                 StateObservation::BitcoinBlockchain(BitcoinBlockchainState {
                     chain: "main".into(),
@@ -392,6 +453,24 @@ mod tests {
                     unsettled_balance_sat: None,
                 }),
                 well_known::LND_CHANNEL_SUMMARY,
+            ),
+            (
+                StateObservation::LndChannel(LndChannelState {
+                    remote_pubkey: String::new(),
+                    capacity_sat: 0,
+                    local_balance_sat: 0,
+                    remote_balance_sat: 0,
+                    active: true,
+                    private: false,
+                    initiator: false,
+                    csv_delay: 0,
+                    commit_fee_sat: 0,
+                    lifetime_seconds: 0,
+                    last_update_height: None,
+                    short_channel_id: None,
+                    peer_online: None,
+                }),
+                well_known::LND_CHANNEL_DETAIL,
             ),
             (
                 StateObservation::Host(HostState {

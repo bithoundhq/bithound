@@ -35,8 +35,22 @@ four RPCs the collector polls — `getblockchaininfo`, `getmempoolinfo`,
 continuously for ≥ 60 seconds, and clears when any one of them
 recovers.
 
-The remaining catalog entries (A4–A8, B1–B6, C1–C3, X1, X2) are
-designed but not yet rule-backed; they land in V0.1+.
+## Implemented in V0.8 (LND wedge — rules land, runtime wiring pending)
+
+V0.8 adds the LND-side surface: two diagnostic rules backed by a new
+`LndGrpcPollingCollector`, plus the typed state variant they read from.
+The rules compile and have unit tests, but the runtime wiring into the
+consumer task and the `[collectors.lnd]` config block stay open as
+follow-ons (BTH-67 Polar e2e, BTH-68 release docs + runtime wiring) —
+the rules don't yet fire in a running sidecar.
+
+| Catalog entry | Rule kind | Module |
+|---|---|---|
+| B1 (channel inactive — peer offline) | `lnd.channel_inactive` | [`src/diagnostics/rules/lnd/channel_inactive.rs`](../src/diagnostics/rules/lnd/channel_inactive.rs) |
+| B6 (chain backend lag) | `lnd.chain_backend_lag` | [`src/diagnostics/rules/lnd/chain_backend_lag.rs`](../src/diagnostics/rules/lnd/chain_backend_lag.rs) |
+
+The remaining catalog entries (A4–A8, B2–B5, C1–C3, X1, X2) are
+designed but not yet rule-backed; they land in V0.9+.
 
 ---
 
@@ -303,6 +317,14 @@ processes). Validate that signature checks are using all available cores
 
 ### B1. Channel inactive — peer offline
 
+> **Rule landed in V0.8 by** `LndChannelInactiveRule` —
+> [`src/diagnostics/rules/lnd/channel_inactive.rs`](../src/diagnostics/rules/lnd/channel_inactive.rs).
+> Fires `lnd.channel_inactive` after 5min (public) / 30min (private)
+> of sustained `active: false`, with severity gating on the
+> `peer_online` cross-reference: inactive while peer online is
+> `Critical/High` (suspicious — peer-side soft failure); peer offline
+> or unknown stays `Warning/Medium`. Runtime wiring follows in BTH-68.
+
 **Symptom.** A channel that was previously usable shows `active: false` in
 `listchannels`. Routing through it fails.
 
@@ -450,6 +472,15 @@ community — these attacks are research-relevant.
 ---
 
 ### B6. Watchtower / chain backend lag
+
+> **Rule landed in V0.8 by** `LndChainBackendLagRule` —
+> [`src/diagnostics/rules/lnd/chain_backend_lag.rs`](../src/diagnostics/rules/lnd/chain_backend_lag.rs).
+> Cross-source rule: fires `lnd.chain_backend_lag` when an LND node's
+> `block_height` falls more than 2 blocks behind a configured bitcoind
+> correlation target for 60+ seconds. Both snapshots gated on a 90s
+> freshness window so a paused collector can't fabricate phantom lag.
+> Watchtower coverage is V0.9+ — V0.8 only covers the chain-backend
+> half. Runtime wiring follows in BTH-68.
 
 **Symptom.** LND log warnings about `chain backend behind` or watchtower
 sessions falling behind.

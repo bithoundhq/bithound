@@ -16,6 +16,7 @@ hmac = "0.13.0"
 prost = "0.13"
 rand = "0.9"
 reqwest = { version = "0.13.3", features = ["json", "query"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 rustls-pemfile = "2"
 secrecy = "0.10.3"
 serde = { version = "1.0.228", features = ["derive"] }

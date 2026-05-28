@@ -1,6 +1,6 @@
 //! Canonical `StateName` string constants, one per `StateObservation` variant.
 //!
-//! Per ADR-R1 §R1.2. The values here are the strings rules pass to
+//! The values here are the strings rules pass to
 //! [`crate::read_models::traits::state::StateReadModel::latest_state`] when
 //! they want the latest state of a given kind. A parity unit test in
 //! `state.rs` asserts that every variant of [`super::StateObservation`]
@@ -13,6 +13,9 @@ pub const BITCOIN_PEER_SUMMARY: &str = "bitcoin.peer_summary";
 pub const LND_NODE: &str = "lnd.node";
 pub const LND_WALLET: &str = "lnd.wallet";
 pub const LND_CHANNEL_SUMMARY: &str = "lnd.channel_summary";
+/// Per-instance channel state (each observation describes one channel).
+/// Distinguished from `LND_CHANNEL_SUMMARY` which is aggregate counts.
+pub const LND_CHANNEL_DETAIL: &str = "lnd.channel_detail";
 pub const HOST_SYSTEM: &str = "host.system";
 
 /// Every canonical state name, used by parity tests and by future
@@ -25,5 +28,6 @@ pub const ALL: &[&str] = &[
     LND_NODE,
     LND_WALLET,
     LND_CHANNEL_SUMMARY,
+    LND_CHANNEL_DETAIL,
     HOST_SYSTEM,
 ];

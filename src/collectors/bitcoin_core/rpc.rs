@@ -24,14 +24,15 @@ use super::rpc_client::{
     BitcoinRpcClient, GetBlockchainInfoResponse, GetMempoolInfoResponse, GetNetworkInfoResponse,
     GetPeerInfoResponse, RpcError,
 };
+use crate::collectors::helpers::{duration_ms, empty_attrs, safe_probe_window, timed};
 use crate::collectors::registry::BitcoinNodeConnection;
 use crate::collectors::traits::PollingCollector;
 use crate::collectors::{CollectionContext, CollectionError, CollectorDescriptor, CollectorTarget};
 use crate::observations::{
-    Attributes, BitcoinBlockchainState, BitcoinMempoolState, BitcoinNetworkState,
-    BitcoinPeerSummaryState, HealthCheckObservation, HealthStatus, HealthTargetId, Observation,
-    ObservationBatch, ObservationContext, ObservationOrigin, ObservationSource, ProbeResult,
-    ProbeWindow, StateObservation,
+    BitcoinBlockchainState, BitcoinMempoolState, BitcoinNetworkState, BitcoinPeerSummaryState,
+    HealthCheckObservation, HealthStatus, HealthTargetId, Observation, ObservationBatch,
+    ObservationContext, ObservationOrigin, ObservationSource, ProbeResult, ProbeWindow,
+    StateObservation,
 };
 use crate::shared::types::{BitcoinNodeId, EntityRef, ObservationBatchId, SidecarId};
 
@@ -275,18 +276,6 @@ impl PollingCollector for BitcoinCoreRpcCollector {
     }
 }
 
-/// Wrap a future so its start and end timestamps travel alongside the
-/// result. Used by `poll` to stamp per-call latency on health
-/// observations under `tokio::join!`.
-async fn timed<F: std::future::Future>(
-    future: F,
-) -> (chrono::DateTime<Utc>, chrono::DateTime<Utc>, F::Output) {
-    let start = Utc::now();
-    let result = future.await;
-    let end = Utc::now();
-    (start, end, result)
-}
-
 impl BitcoinCoreRpcCollector {
     #[allow(clippy::too_many_arguments)]
     fn failed(
@@ -343,32 +332,6 @@ pub const HEALTH_TARGETS: &[&str] = &[
     HEALTH_NETWORK,
     HEALTH_PEERS,
 ];
-
-fn empty_attrs() -> Attributes {
-    Attributes(std::collections::BTreeMap::new())
-}
-
-/// Construct a `ProbeWindow` defensively. A backwards clock jump
-/// between `started_at` and `completed_at` collapses to a zero-width
-/// window pinned at the later instant instead of panicking — matches
-/// the failure path's old fallback so the success path doesn't crash
-/// the poll task on NTP correction.
-fn safe_probe_window(
-    started_at: chrono::DateTime<Utc>,
-    completed_at: chrono::DateTime<Utc>,
-) -> ProbeWindow {
-    ProbeWindow::new(started_at, completed_at)
-        .unwrap_or_else(|_| ProbeWindow::new(completed_at, completed_at).unwrap())
-}
-
-fn duration_ms(from: chrono::DateTime<Utc>, to: chrono::DateTime<Utc>) -> Option<u64> {
-    let ms = (to - from).num_milliseconds();
-    if ms < 0 {
-        None
-    } else {
-        Some(ms as u64)
-    }
-}
 
 fn blockchain_state(r: GetBlockchainInfoResponse) -> BitcoinBlockchainState {
     BitcoinBlockchainState {

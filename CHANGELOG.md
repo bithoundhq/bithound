@@ -13,6 +13,75 @@ mock bitcoind, plus a refreshed README and a new operator guide.
 
 ## [Unreleased]
 
+## [0.0.8.0] - 2026-05-24
+
+### Added
+
+Phase v0.8 — LND wedge. Bithound can now observe an LND node alongside
+the existing Bitcoin Core path. The phase ships the typed surface, the
+gRPC collector, two diagnostic rules, and the internal incident kinds
+for LND-side sidecar failures. End-to-end Polar verification and
+runtime wiring of the new rules into the consumer stay open as
+follow-ons (BTH-67, BTH-68).
+
+- **Vendored LND `lightning.proto`.** New `src/collectors/lnd/proto/`
+  carries the upstream proto at LND v0.20.1-beta plus a README pinning
+  the commit; `build.rs` compiles it via `tonic-build` and the
+  generated client lives under `crate::collectors::lnd::lnrpc`.
+- **`LndChannelState` + `lnd.channel_detail` observation.** New state
+  variant on `StateObservation` carries the per-channel snapshot the
+  rules read; includes the `peer_online` cross-reference field stamped
+  by the polling collector. Parity tests keep `name()` and
+  `state/well_known.rs` aligned.
+- **`lnd.channel_inactive` and `lnd.chain_backend_lag` incident kinds.**
+  Registered in the built-in catalog (`config/default_kinds.toml`) and
+  in `incidents::well_known`; both gated on the existing kind-registry
+  parity test.
+- **`LndGrpcClient`.** Thin tonic wrapper that trusts only the
+  configured LND TLS cert (no native roots), stamps the macaroon as a
+  per-request metadata header from a `SecretString`, and wraps every
+  RPC in a `tokio::time::timeout`. Channel is built with
+  `connect_lazy()` so startup failure is reserved for config bugs
+  (missing cert, missing `https://` scheme), not network state.
+  Installs the rustls `ring` `CryptoProvider` once via `std::sync::Once`.
+- **`LndGrpcPollingCollector`.** Fires `GetInfo` + `ListChannels` +
+  `ListPeers` in parallel via `tokio::join!`, stamps `peer_online` on
+  each `LndChannelState` from a `HashSet<String>` of connected peer
+  pubkeys, and skips channels with an empty `channel_point` so every
+  `LndChannelId` is meaningful. Health observations per RPC,
+  partial-failure preservation matching the Bitcoin collector shape.
+- **`LndChannelInactiveRule`.** Public/private hysteresis (5min/30min
+  defaults) on `LndChannel` subjects, with severity gating on
+  `peer_online`: channel inactive while peer online is `Critical/High`
+  (suspicious — peer-side soft failure), peer offline or unknown stays
+  `Warning/Medium`.
+- **`LndChainBackendLagRule`.** Cross-source rule on `LndNode`
+  subjects: compares `LndNodeState.block_height` against the
+  configured bitcoind correlation target's `BitcoinBlockchainState.blocks`.
+  Default threshold 2 blocks for 60s. Both snapshots are gated on a 90s
+  freshness window so a paused collector can't fabricate phantom lag
+  against the other side's fresh tip.
+- **`bithound.lnd_unreachable`, `lnd_auth_failed`, `lnd_tls_invalid`
+  internal incident kinds.** Sidecar-subjected kinds covering the
+  three operational shapes the LND collector exposes when it can't
+  reach the node, with the bidirectional parity guard catching drift
+  between `well_known::ALL` and the embedded TOML catalog.
+- **Drive-by fix in `parse_subject_kind`.** Added the missing
+  `"Sidecar"` arm so TOML entries with sidecar-subjected kinds parse;
+  the BTH-66 entries were the first to surface the gap.
+
+### Changed
+
+- **Drop in-code ADR references.** Scrubbed `BTH-N` / `ADR-X` tags
+  from in-tree docstrings on the V0.8 surface (including some
+  pre-existing references on `state.rs` and `state/well_known.rs`)
+  per the project preference: commit subjects and PR bodies stay the
+  source of truth, source comments do not.
+- **Pruning of hysteresis state caps `active_emitted=true` entries at
+  24h.** Previously, entries with `active_emitted=true` were retained
+  forever in `prune_stale` for both LND rules. The cap prevents the
+  in-memory store from accumulating after a collector goes silent.
+
 ## [0.0.7.1] - 2026-05-24
 
 ### Changed
