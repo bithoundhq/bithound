@@ -178,8 +178,12 @@ vocabulary in a comment or doc, fix it as a drive-by.
 
 ## Picking up work
 
-- Filter open Issues by label: `is:open label:phase:01` for Phase 1 work,
-  `is:open label:priority:high label:size:S` for small high-priority work, etc.
+- Filter open Issues by label: `is:open label:phase:v0.8` for the
+  current V0.8 follow-on work, `is:open label:priority:high label:size:S`
+  for small high-priority work, etc. The early V0 phases use numeric
+  labels (`phase:01` … `phase:12`, plus `phase:a` for the operator API
+  and `phase:d` for the domain-refinement cluster); newer phases use
+  semver-style labels like `phase:v0.8`.
 - Phase 1 (BTH-1 … BTH-6) unblocks the largest amount of downstream work.
 - Phases 3 (storage), 5 (engine), 6 (read models), 7 (collectors) can be done
   in parallel after Phase 1+2 land.

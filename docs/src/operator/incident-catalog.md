@@ -107,9 +107,14 @@ for the per-error reference.
 
 ## Diagnostic backlog
 
-V0 wires three rules. The longer list of incident patterns we plan to
-detect — with symptom / signals / diagnosis / action / look-alikes for
-each — lives in
+V0 wires three rules; v0.0.8.0 added two more in-tree but not yet
+wired into the runtime. The longer list of incident patterns we plan
+to detect — with symptom / signals / diagnosis / action / look-alikes
+for each — lives in
 [`docs/INCIDENT_CATALOG.md`](https://github.com/bithoundhq/bithound/blob/main/docs/INCIDENT_CATALOG.md).
-Catalog entries A1, A2, A3 are the three V0 entries already wired to
-rules. The remaining A4–A8, B1–B6, C1–C3, X1, X2 land in V0.1+.
+Catalog entries A1, A2, A3 are the three V0 entries wired to rules
+and reachable from the running sidecar. Catalog entries B1 and B6
+have rule implementations as of v0.0.8.0 (`lnd.channel_inactive`,
+`lnd.chain_backend_lag`) but the runtime wiring lands in BTH-67
+(Polar e2e) and BTH-68 — they don't fire in a running sidecar yet.
+The remaining A4–A8, B2–B5, C1–C3, X1, X2 land in V0.9+.

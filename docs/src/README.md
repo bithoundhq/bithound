@@ -59,8 +59,11 @@ Discord, and generic webhook sinks.
 
 ## What V0 doesn't do
 
-- Monitor LND or Elements. The config schema accepts those blocks so
-  V0.1 can land without migration; no collectors are wired yet.
+- Monitor LND or Elements end-to-end. v0.0.8.0 ships the LND
+  typed surface, gRPC polling collector, and two diagnostic rules
+  (`lnd.channel_inactive`, `lnd.chain_backend_lag`) in-tree, but
+  the runtime wiring + `[collectors.lnd]` config-loading land in
+  BTH-67 (Polar e2e) and BTH-68. Elements has no collector yet.
 - Subscribe to ZMQ. The `zmq_endpoint` config field is parsed but
   ignored; ZMQ collectors land in V0.1.
 - Expose a browser UI. The operator API speaks JSON over loopback
