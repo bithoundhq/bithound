@@ -14,7 +14,12 @@ use thiserror::Error;
 use crate::collectors::bitcoin_core::rpc::{
     BitcoinCoreRpcCollector, BitcoinCoreRpcCollectorConfig, BuildError as RpcBuildError,
 };
-use crate::collectors::registry::{BitcoinNodeConnection, BitcoinRpcAuth, NodeRegistry};
+use crate::collectors::lnd::grpc_poll::{
+    BuildError as LndBuildError, LndGrpcPollingCollector, LndGrpcPollingCollectorConfig,
+};
+use crate::collectors::registry::{
+    BitcoinNodeConnection, BitcoinRpcAuth, LndNodeConnection, NodeRegistry,
+};
 use crate::collectors::traits::{PollingCollector, SubscriptionCollector};
 use crate::collectors::{CollectorDescriptor, CollectorTarget, IntegrationKind};
 use crate::config::collectors::{
@@ -23,7 +28,7 @@ use crate::config::collectors::{
 use crate::config::targets::BitcoinAuthConfig;
 use crate::config::Config;
 use crate::config::ResolvedSecrets;
-use crate::shared::types::{BitcoinNodeId, CollectorId};
+use crate::shared::types::{BitcoinNodeId, CollectorId, LndNodeId};
 
 #[derive(Debug, Error)]
 pub enum BuildError {
@@ -50,6 +55,13 @@ pub enum BuildError {
         id: String,
         #[source]
         source: RpcBuildError,
+    },
+
+    #[error("LND collector {id:?} build failed: {source}")]
+    InnerLnd {
+        id: String,
+        #[source]
+        source: LndBuildError,
     },
 }
 
@@ -112,10 +124,48 @@ pub fn build_polling_collectors(
             // Subscription kinds belong to `build_subscription_collectors`;
             // they're not an error here.
             IntegrationConfig::BitcoinCoreZmq | IntegrationConfig::LndGrpcStream => continue,
-            // Other polling kinds: deferred to V0.1+.
-            IntegrationConfig::LndGrpcPoll { .. } => {
-                return Err(BuildError::NotImplemented("lnd_grpc_poll"));
+            IntegrationConfig::LndGrpcPoll { interval_seconds } => {
+                let target = collector_target(&cfg.target);
+                let node_id = match &target {
+                    CollectorTarget::LndNode(id) => id,
+                    _ => {
+                        return Err(BuildError::WrongTargetKind {
+                            id: cfg.id.clone(),
+                            target_kind: target_kind_name(&target),
+                            integration_kind: "lnd_grpc_poll",
+                        });
+                    }
+                };
+                let connection = registry.lnd_nodes.get(node_id).cloned().ok_or_else(|| {
+                    BuildError::TargetNotFound {
+                        id: cfg.id.clone(),
+                        target: node_id.0.clone(),
+                    }
+                })?;
+
+                let descriptor = CollectorDescriptor {
+                    id: CollectorId(cfg.id.clone()),
+                    integration: IntegrationKind::LndGrpcPoll {
+                        interval: ChronoDuration::seconds(*interval_seconds as i64),
+                    },
+                    target,
+                    instance_label: cfg.instance_label.clone(),
+                    description: cfg.description.clone(),
+                };
+
+                let collector = LndGrpcPollingCollector::new(
+                    descriptor,
+                    connection,
+                    LndGrpcPollingCollectorConfig::default(),
+                )
+                .map_err(|source| BuildError::InnerLnd {
+                    id: cfg.id.clone(),
+                    source,
+                })?;
+
+                out.push(Box::new(collector));
             }
+            // Polling kinds deferred to V0.9+.
             IntegrationConfig::LndRest { .. } => {
                 return Err(BuildError::NotImplemented("lnd_rest"));
             }
@@ -190,11 +240,29 @@ pub fn node_registry_from_config(
         );
     }
 
-    // LND and host registries remain empty in V0. Their config
-    // shapes are accepted by the schema but Phase 10 doesn't
-    // construct any collector against them.
+    let mut lnd_nodes: HashMap<LndNodeId, LndNodeConnection> = HashMap::new();
+
+    for node in &config.lnd_nodes {
+        let macaroon = secrets
+            .get(&node.macaroon_env)
+            .ok_or_else(|| BuildError::SecretNotResolved(node.macaroon_env.clone()))?
+            .clone();
+
+        lnd_nodes.insert(
+            LndNodeId(node.id.clone()),
+            LndNodeConnection {
+                grpc_endpoint: node.grpc_endpoint.clone(),
+                rest_endpoint: node.rest_endpoint.clone(),
+                macaroon,
+                tls_cert_path: node.tls_cert_path.clone(),
+            },
+        );
+    }
+
+    // Host registry remains empty in V0.8; host collector lands in V0.9+.
     Ok(NodeRegistry {
         bitcoin_nodes,
+        lnd_nodes,
         ..Default::default()
     })
 }
@@ -364,5 +432,103 @@ mod tests {
         let subs = build_subscription_collectors(&cfgs, &registry, &http_client())
             .expect("build should succeed");
         assert!(subs.is_empty());
+    }
+
+    // ─── LND polling collector tests (v0.0.8.0+) ──────────────────────
+
+    fn lnd_descriptor(
+        id: &str,
+        target_id: &str,
+        interval_seconds: u32,
+    ) -> CollectorDescriptorConfig {
+        CollectorDescriptorConfig {
+            id: id.into(),
+            target: CollectorTargetConfig::LndNode {
+                id: target_id.into(),
+            },
+            integration: IntegrationConfig::LndGrpcPoll { interval_seconds },
+            instance_label: id.into(),
+            description: None,
+        }
+    }
+
+    fn registry_with_lnd(node_id: &str, tls_cert_path: &str) -> NodeRegistry {
+        let mut lnd = HashMap::new();
+        lnd.insert(
+            LndNodeId(node_id.into()),
+            LndNodeConnection {
+                grpc_endpoint: "https://127.0.0.1:10009".into(),
+                rest_endpoint: None,
+                macaroon: secrecy::SecretString::from("00aabbcc"),
+                tls_cert_path: tls_cert_path.into(),
+            },
+        );
+        NodeRegistry {
+            lnd_nodes: lnd,
+            ..Default::default()
+        }
+    }
+
+    /// Writes a placeholder TLS cert into a tempfile so the LND
+    /// build path can read it. The bytes don't have to be a valid
+    /// cert at construction time — tonic only parses on the first
+    /// dial — but the file must exist and be readable.
+    fn tempfile_with(bytes: &[u8]) -> tempfile::NamedTempFile {
+        use std::io::Write;
+        let mut f = tempfile::NamedTempFile::new().expect("tempfile");
+        f.write_all(bytes).expect("write tempfile");
+        f
+    }
+
+    // NOTE: a happy-path "builds an LndGrpcPollingCollector" test would
+    // need a real DER-encoded self-signed cert to satisfy
+    // tonic 0.12's `ClientTlsConfig::ca_certificate` parsing.
+    // Generating one inside a unit test is overkill for v0.8; the
+    // BTH-67 Polar e2e harness exercises the success path with real
+    // LND TLS material. These tests cover the build-error shapes
+    // that don't reach TLS parsing.
+
+    #[test]
+    fn lnd_collector_with_bitcoin_target_is_wrong_target_kind() {
+        let cert =
+            tempfile_with(b"-----BEGIN CERTIFICATE-----\nplaceholder\n-----END CERTIFICATE-----\n");
+        let registry = registry_with_lnd("polar-lnd", cert.path().to_str().unwrap());
+
+        // Bitcoin target paired with the LND integration kind.
+        let mut cfg = lnd_descriptor("oops", "polar-lnd", 5);
+        cfg.target = CollectorTargetConfig::BitcoinNode {
+            id: "polar-lnd".into(),
+        };
+
+        let err = build_polling_collectors(&[cfg], &registry, &http_client())
+            .map(|_| ())
+            .unwrap_err();
+        match err {
+            BuildError::WrongTargetKind {
+                integration_kind, ..
+            } => {
+                assert_eq!(integration_kind, "lnd_grpc_poll");
+            }
+            other => panic!("expected WrongTargetKind, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lnd_collector_with_unknown_target_returns_target_not_found() {
+        let cert =
+            tempfile_with(b"-----BEGIN CERTIFICATE-----\nplaceholder\n-----END CERTIFICATE-----\n");
+        let registry = registry_with_lnd("polar-lnd", cert.path().to_str().unwrap());
+        let cfg = lnd_descriptor("ghost-lnd-grpc", "nonexistent-lnd", 5);
+
+        let err = build_polling_collectors(&[cfg], &registry, &http_client())
+            .map(|_| ())
+            .unwrap_err();
+        match err {
+            BuildError::TargetNotFound { id, target } => {
+                assert_eq!(id, "ghost-lnd-grpc");
+                assert_eq!(target, "nonexistent-lnd");
+            }
+            other => panic!("expected TargetNotFound, got {other:?}"),
+        }
     }
 }

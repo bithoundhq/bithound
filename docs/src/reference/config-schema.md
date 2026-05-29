@@ -20,7 +20,7 @@ A copyable annotated example with every supported field is
 | `[api]` | no (defaults) | `ApiConfig` |
 | `[incidents]` | no | `IncidentsConfig` |
 | `[[bitcoin_nodes]]` | no | `Vec<BitcoinNodeConfig>` |
-| `[[lnd_nodes]]` | no (reserved) | `Vec<LndNodeConfig>` |
+| `[[lnd_nodes]]` | no | `Vec<LndNodeConfig>` |
 | `[[hosts]]` | no (reserved) | `Vec<HostConfig>` |
 | `[[collectors]]` | yes (≥1) | `Vec<CollectorDescriptorConfig>` |
 | `[notifications]` | no | `NotificationsConfig` |
@@ -117,6 +117,38 @@ password_env = "BITHOUND_BITCOIN_ALICE_PASSWORD"
 attributions reference. `zmq_endpoint` is parsed for forward
 compatibility; V0 has no ZMQ collector.
 
+## `[[lnd_nodes]]`
+
+```toml
+[[lnd_nodes]]
+id = "lnd-alice"                                    # required, unique per file
+grpc_endpoint = "https://127.0.0.1:10009"           # required, must include https://
+macaroon_env = "BITHOUND_LND_ALICE_MACAROON"        # required, names the env var
+tls_cert_path = "/var/lib/lnd/tls.cert"             # required, path on disk
+rest_endpoint = "https://127.0.0.1:8080"            # optional, reserved for V0.9+
+chain_backend_target_bitcoind_id = "btc-alice"      # optional (see below)
+```
+
+- **`grpc_endpoint`** must start with `https://`. bithound trusts ONLY
+  the cert at `tls_cert_path` (no native roots, no public CAs); LND's
+  self-signed cert is the norm and trusting public CAs would create a
+  MITM-via-compromised-CA risk for no gain.
+- **`macaroon_env`** names the env var holding the raw macaroon bytes.
+  bithound hex-encodes the bytes at startup and stamps them as the
+  `macaroon` metadata header on every RPC. The macaroon never lands in
+  the TOML file or the audit log.
+- **`tls_cert_path`** must be readable when bithound starts. A missing
+  or malformed cert exits with `EX_CONFIG=78` — config bugs are loud
+  at startup, not silent runtime failures.
+- **`rest_endpoint`** is parsed for forward compatibility; the V0.8
+  collector uses gRPC exclusively.
+- **`chain_backend_target_bitcoind_id`** ties this LND node to the
+  bitcoind it should be cross-correlated against for the
+  `lnd.chain_backend_lag` rule. Optional when exactly one
+  `[[bitcoin_nodes]]` entry is present (the runtime auto-resolves);
+  required when multiple bitcoind nodes are configured. An unknown
+  id is a config error at load time.
+
 ## `[[collectors]]`
 
 ```toml
@@ -128,15 +160,18 @@ instance_label = "alice"                                               # require
 description = "Bitcoin Core RPC polling for alice"                     # optional
 ```
 
-V0 supports one integration kind:
+V0/v0.0.8.0 supports two integration kinds:
 
-- **`bitcoin_core_rpc`** with `interval_seconds: u32` — the polling
-  cadence in seconds.
+- **`bitcoin_core_rpc`** with `interval_seconds: u32` — Bitcoin Core
+  JSON-RPC polling cadence.
+- **`lnd_grpc_poll`** with `interval_seconds: u32` — LND gRPC polling
+  cadence. Fires `GetInfo` + `ListChannels` + `ListPeers` in parallel
+  on each tick; the target must reference an `[[lnd_nodes]]` entry.
 
 Other variants are parsed and rejected at runtime build time:
 
-- `bitcoin_core_zmq`, `lnd_grpc_stream` — subscription kinds, V0.1+.
-- `lnd_grpc_poll`, `lnd_rest`, `host` — polling kinds, V0.1+.
+- `bitcoin_core_zmq`, `lnd_grpc_stream` — subscription kinds, V0.9+.
+- `lnd_rest`, `host` — polling kinds, V0.9+.
 
 Cross-reference: a collector's `target.id` must match an entry in
 the corresponding `[[bitcoin_nodes]]` / `[[lnd_nodes]]` / `[[hosts]]`

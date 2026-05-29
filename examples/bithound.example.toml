@@ -46,6 +46,24 @@ password_env = "BITHOUND_BITCOIN_ALICE_PASSWORD"
 # type = "cookie_file"
 # path = "/var/lib/bitcoind/.cookie"
 
+# Lightning Network node. Uncomment to enable LND monitoring. The
+# gRPC endpoint must include the `https://` scheme; bithound trusts
+# ONLY the configured `tls_cert_path` (no native roots), and the
+# macaroon bytes come from the env var named here.
+#
+# `chain_backend_target_bitcoind_id` ties this LND node to the
+# bitcoind it should be cross-correlated against for the
+# `lnd.chain_backend_lag` rule. Optional when exactly one
+# [[bitcoin_nodes]] entry is present (the runtime auto-resolves);
+# required when multiple bitcoind nodes are configured.
+#
+# [[lnd_nodes]]
+# id = "lnd-alice"
+# grpc_endpoint = "https://127.0.0.1:10009"
+# macaroon_env = "BITHOUND_LND_ALICE_MACAROON"
+# tls_cert_path = "/var/lib/lnd/tls.cert"
+# chain_backend_target_bitcoind_id = "btc-alice"
+
 # ---- collectors ----
 [[collectors]]
 id = "btc-alice-rpc"
@@ -53,6 +71,16 @@ target = { type = "bitcoin_node", id = "btc-alice" }
 integration = { type = "bitcoin_core_rpc", interval_seconds = 10 }
 instance_label = "alice"
 description = "Bitcoin Core RPC polling for alice"
+
+# Matching LND collector for the [[lnd_nodes]] above. Uncomment
+# along with the [[lnd_nodes]] block.
+#
+# [[collectors]]
+# id = "lnd-alice-grpc"
+# target = { type = "lnd_node", id = "lnd-alice" }
+# integration = { type = "lnd_grpc_poll", interval_seconds = 10 }
+# instance_label = "alice"
+# description = "LND gRPC polling for alice"
 
 # ---- notifications ----
 [notifications.telegram]
