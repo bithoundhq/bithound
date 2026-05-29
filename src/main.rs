@@ -32,6 +32,7 @@ use crate::config::{Config, LoadedConfig, ResolvedSecrets};
 use crate::diagnostics::rules::bitcoin::{
     BitcoinNoPeersRule, BitcoinRpcUnreachableRule, BitcoinTipLagOrIbdStalledRule,
 };
+use crate::diagnostics::rules::lnd::{LndChainBackendLagRule, LndChannelInactiveRule};
 use crate::diagnostics::traits::DiagnosticRule;
 use crate::incidents::kinds::KindRegistry;
 use crate::incidents::repository::IncidentRepository;
@@ -161,11 +162,23 @@ async fn boot_runtime(loaded: LoadedConfig) -> anyhow::Result<()> {
         build_notification_rules(&config.notification_rules, &config.notifications, &secrets)?;
     let senders = build_senders(&config.notifications, &secrets, &http)?;
 
-    let rules: Vec<Box<dyn DiagnosticRule>> = vec![
+    let mut rules: Vec<Box<dyn DiagnosticRule>> = vec![
         Box::new(BitcoinRpcUnreachableRule::new()),
         Box::new(BitcoinNoPeersRule::new()),
         Box::new(BitcoinTipLagOrIbdStalledRule::new()),
     ];
+
+    // LND rules: one LndChannelInactiveRule shared across every LND
+    // channel subject, and one LndChainBackendLagRule per LND node so
+    // each LND can carry its own bitcoind correlation target.
+    if !config.lnd_nodes.is_empty() {
+        rules.push(Box::new(LndChannelInactiveRule::new()));
+        for lnd_node in &config.lnd_nodes {
+            let target = resolve_chain_backend_target(lnd_node, &config.bitcoin_nodes)
+                .map_err(anyhow::Error::msg)?;
+            rules.push(Box::new(LndChainBackendLagRule::new(target)));
+        }
+    }
 
     let deps = runtime::RuntimeDeps {
         sidecar_id,
@@ -186,6 +199,44 @@ async fn boot_runtime(loaded: LoadedConfig) -> anyhow::Result<()> {
 
     runtime::run(deps).await?;
     Ok(())
+}
+
+/// Resolve the bitcoind correlation target for an LND node's
+/// `lnd.chain_backend_lag` rule.
+///
+/// - Operator-specified `chain_backend_target_bitcoind_id` is looked
+///   up in `[[bitcoin_nodes]]`; an unknown id is a config error.
+/// - When omitted, exactly one bitcoind in the config is auto-resolved;
+///   zero or more-than-one bitcoinds is a config error (the rule
+///   can't pick for the operator).
+fn resolve_chain_backend_target(
+    lnd_node: &crate::config::targets::LndNodeConfig,
+    bitcoin_nodes: &[crate::config::targets::BitcoinNodeConfig],
+) -> Result<crate::shared::types::BitcoinNodeId, String> {
+    if let Some(explicit) = &lnd_node.chain_backend_target_bitcoind_id {
+        if !bitcoin_nodes.iter().any(|b| &b.id == explicit) {
+            return Err(format!(
+                "[[lnd_nodes]] id={:?}: chain_backend_target_bitcoind_id={:?} \
+                 does not match any [[bitcoin_nodes]].id",
+                lnd_node.id, explicit
+            ));
+        }
+        return Ok(crate::shared::types::BitcoinNodeId(explicit.clone()));
+    }
+    match bitcoin_nodes {
+        [single] => Ok(crate::shared::types::BitcoinNodeId(single.id.clone())),
+        [] => Err(format!(
+            "[[lnd_nodes]] id={:?}: chain_backend_target_bitcoind_id is \
+             required because no [[bitcoin_nodes]] is configured",
+            lnd_node.id
+        )),
+        many => Err(format!(
+            "[[lnd_nodes]] id={:?}: chain_backend_target_bitcoind_id is \
+             required when multiple bitcoind nodes are configured ({} present)",
+            lnd_node.id,
+            many.len()
+        )),
+    }
 }
 
 fn build_notification_rules(
@@ -329,4 +380,76 @@ fn build_senders(
         telegram,
         discord,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::targets::{BitcoinAuthConfig, BitcoinNodeConfig, LndNodeConfig};
+
+    fn lnd_node(id: &str, target: Option<&str>) -> LndNodeConfig {
+        LndNodeConfig {
+            id: id.into(),
+            grpc_endpoint: "https://127.0.0.1:10009".into(),
+            rest_endpoint: None,
+            macaroon_env: "BITHOUND_LND_MACAROON".into(),
+            tls_cert_path: "/var/lib/bithound/lnd.tls.cert".into(),
+            chain_backend_target_bitcoind_id: target.map(String::from),
+        }
+    }
+
+    fn btc_node(id: &str) -> BitcoinNodeConfig {
+        BitcoinNodeConfig {
+            id: id.into(),
+            rpc_url: format!("http://127.0.0.1:8332/{id}"),
+            zmq_endpoint: None,
+            auth: BitcoinAuthConfig::CookieFile {
+                path: "/var/lib/bitcoind/.cookie".into(),
+            },
+        }
+    }
+
+    #[test]
+    fn single_bitcoind_auto_resolves_correlation_target() {
+        let lnd = lnd_node("primary", None);
+        let bitcoins = [btc_node("alice")];
+
+        let target = resolve_chain_backend_target(&lnd, &bitcoins).expect("single bitcoind");
+        assert_eq!(target.0, "alice");
+    }
+
+    #[test]
+    fn explicit_target_matches_a_configured_bitcoind() {
+        let lnd = lnd_node("primary", Some("bob"));
+        let bitcoins = [btc_node("alice"), btc_node("bob")];
+
+        let target = resolve_chain_backend_target(&lnd, &bitcoins).expect("explicit match");
+        assert_eq!(target.0, "bob");
+    }
+
+    #[test]
+    fn explicit_target_unknown_is_a_config_error() {
+        let lnd = lnd_node("primary", Some("nobody"));
+        let bitcoins = [btc_node("alice")];
+
+        let err = resolve_chain_backend_target(&lnd, &bitcoins).expect_err("unknown target");
+        assert!(err.contains("does not match"));
+    }
+
+    #[test]
+    fn no_bitcoinds_with_unset_target_is_a_config_error() {
+        let lnd = lnd_node("primary", None);
+
+        let err = resolve_chain_backend_target(&lnd, &[]).expect_err("no bitcoinds");
+        assert!(err.contains("no [[bitcoin_nodes]]"));
+    }
+
+    #[test]
+    fn multiple_bitcoinds_without_explicit_target_is_a_config_error() {
+        let lnd = lnd_node("primary", None);
+        let bitcoins = [btc_node("alice"), btc_node("bob")];
+
+        let err = resolve_chain_backend_target(&lnd, &bitcoins).expect_err("ambiguous target");
+        assert!(err.contains("multiple bitcoind nodes"));
+    }
 }

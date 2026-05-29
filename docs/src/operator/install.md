@@ -71,6 +71,55 @@ keep it `0600`-readable by the bithound user only. The config TOML
 itself never contains secret values; every secret is referenced by
 env-var name (the field suffix ends in `_env`).
 
+## Adding LND monitoring (v0.0.8.0+)
+
+LND monitoring needs three artifacts from the LND host: a TLS cert,
+a macaroon, and a reachable gRPC endpoint. Standard LND installs
+keep these under `~/.lnd/`:
+
+| Artifact | Default path | Purpose |
+| --- | --- | --- |
+| TLS cert | `~/.lnd/tls.cert` | LND's self-signed cert; bithound trusts ONLY this cert (no public CAs). |
+| Macaroon | `~/.lnd/data/chain/bitcoin/<network>/readonly.macaroon` | Bytes carry the auth grant; read-only is sufficient for v0.0.8.0. |
+| gRPC port | `:10009` (default) | Same host as LND; expose it as `https://...:10009`. |
+
+Copy or mount the TLS cert into a path the bithound user can read
+(e.g. `/var/lib/bithound/lnd.tls.cert`, `0644`). Read the macaroon
+into an env var the systemd unit can hand to bithound:
+
+```bash
+sudo install -m 0644 -o bithound -g bithound \
+  /path/to/lnd/tls.cert /var/lib/bithound/lnd.tls.cert
+
+# In /etc/bithound/bithound.env — never commit this file:
+BITHOUND_LND_ALICE_MACAROON=$(xxd -ps -u -c 1000 /path/to/readonly.macaroon)
+```
+
+Then add the LND blocks to `/etc/bithound/bithound.toml`:
+
+```toml
+[[lnd_nodes]]
+id = "lnd-alice"
+grpc_endpoint = "https://127.0.0.1:10009"
+macaroon_env = "BITHOUND_LND_ALICE_MACAROON"
+tls_cert_path = "/var/lib/bithound/lnd.tls.cert"
+# Omit chain_backend_target_bitcoind_id when exactly one [[bitcoin_nodes]]
+# is configured — the runtime resolves it automatically.
+
+[[collectors]]
+id = "lnd-alice-grpc"
+target = { type = "lnd_node", id = "lnd-alice" }
+integration = { type = "lnd_grpc_poll", interval_seconds = 10 }
+instance_label = "alice"
+description = "LND gRPC polling for alice"
+```
+
+bithound's [config-schema reference](../reference/config-schema.md#lnd_nodes)
+documents every field. On `--check-config`, a missing TLS cert or a
+gRPC endpoint without `https://` exits with `EX_CONFIG=78` and names
+the offending field. **End-to-end verification follows BTH-67's
+Polar regtest harness — see `tests/POLAR.md`.**
+
 ## Verifying
 
 ```bash

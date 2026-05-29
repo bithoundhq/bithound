@@ -101,9 +101,9 @@ integer, a bool stays bool.
 | `[runtime]` | no | Channel capacity, shutdown deadline. Defaults are V0-tuned. |
 | `[api]` | no | Operator HTTP API bind + enable flag. Defaults to loopback. |
 | `[incidents]` | no | Optional path to a user-supplied incident-kind catalog. |
-| `[[bitcoin_nodes]]` | no | One or more Bitcoin Core nodes to monitor (V0 only knows this kind). |
-| `[[lnd_nodes]]` | no | Reserved for V0.1; parsed but ignored. |
-| `[[hosts]]` | no | Reserved for V0.1; parsed but ignored. |
+| `[[bitcoin_nodes]]` | no | One or more Bitcoin Core nodes to monitor. |
+| `[[lnd_nodes]]` | no | One or more LND nodes to monitor (v0.0.8.0+). |
+| `[[hosts]]` | no | Reserved for V0.9+; parsed but ignored. |
 | `[[collectors]]` | yes (≥1) | Per-collector binding of an integration kind to a target. |
 | `[notifications.telegram]` | no | Sink-wide Telegram config (one bot token serves every Telegram rule). |
 | `[notifications.discord]` | no | Sink-wide Discord placeholder. |

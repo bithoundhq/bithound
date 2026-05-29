@@ -31,8 +31,17 @@ pub enum BitcoinAuthConfig {
     CookieFile { path: String },
 }
 
-/// `[[lnd_nodes]]` — reserved for V0.1+. Defined now so the TOML
-/// schema is closed off (`deny_unknown_fields` on the parent table).
+/// `[[lnd_nodes]]` — wired in v0.0.8.0 via the LND gRPC polling
+/// collector. `grpc_endpoint` must include the `https://` scheme;
+/// `macaroon_env` names the env var holding the macaroon bytes
+/// (hex-encoded at construction); `tls_cert_path` points at LND's
+/// self-signed cert (the only TLS root the client trusts).
+///
+/// `chain_backend_target_bitcoind_id` ties this LND node to the
+/// bitcoind it should be cross-correlated against for the
+/// `lnd.chain_backend_lag` rule. Optional when exactly one bitcoind
+/// is configured (the runtime resolves it automatically); required
+/// for multi-bitcoind deployments.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LndNodeConfig {
@@ -42,6 +51,8 @@ pub struct LndNodeConfig {
     pub rest_endpoint: Option<String>,
     pub macaroon_env: String,
     pub tls_cert_path: String,
+    #[serde(default)]
+    pub chain_backend_target_bitcoind_id: Option<String>,
 }
 
 /// `[[hosts]]` — reserved for V0.1+.
