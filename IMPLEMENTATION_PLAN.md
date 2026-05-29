@@ -3,6 +3,18 @@
 Derived from `SPEC.md` ADRs 001, L1–L5, R1–R3, C1–C3, S1–S3, P1, P2, X1
 (eighteen accepted decisions as of 2026-05-17). Tickets are in `TICKETS.md`.
 
+> **Status (2026-05-29).** V0 shipped end-to-end in 0.0.5.0 (BTH-1
+> through BTH-41). Phase A (local operator API, BTH-56 + BTH-57)
+> shipped in 0.0.7.0. Phase D (BTH-42 through BTH-50, domain
+> refinement) is interleaved with the main timeline. Phase v0.8
+> (LND-first wedge, BTH-59 through BTH-66) shipped in 0.0.8.0,
+> covering the typed surface + gRPC polling collector + two
+> diagnostic rules — runtime wiring follows in BTH-67 (Polar e2e)
+> and BTH-68. The "Deferred to V0.1+" line below predates the V0.8
+> split and is now partly satisfied: most LND scope landed in V0.8;
+> the host collector, suppression rules, observation-store replay,
+> and retry scheduler stay in V0.9+.
+
 ## Goals
 
 - Reach a runnable V0 sidecar that monitors a single Bitcoin Core node,
@@ -45,7 +57,8 @@ HA / multi-sidecar. Each has a designed surface to land against later.
 | 12| End-to-end verification & docs     | BTH-40–41 | —                        |
 | A | Local operator API                 | **BTH-56, BTH-57** | **ADR-A1**           |
 | D | Domain refinement (DMMF alignment) | BTH-42–50 | ADR-D1, D2, D3, D4       |
-| V0.1 | (deferred from V0)              | BTH-30, BTH-31, BTH-53 | ADR-P3 §§P3.5–P3.8 |
+| V0.1 | (deferred from V0; mostly absorbed by Phase v0.8) | BTH-30, BTH-31, BTH-53 | ADR-P3 §§P3.5–P3.8 |
+| v0.8 | LND-first wedge                 | **BTH-59–69** | **ADR-E1, E2**       |
 
 **Phase D** can run in parallel with phases 3–10 once Phase 1 is done.
 BTH-47 (Unvalidated/Validated split) and BTH-48 (ActorId + commands)

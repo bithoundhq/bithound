@@ -123,8 +123,11 @@ setup and notification-sink credentials.
 
 ## What V0 doesn't do
 
-- Monitor LND or Elements (config schema accepts those blocks so
-  V0.1 can land without migration; no collectors are wired yet).
+- Monitor LND or Elements end-to-end. v0.0.8.0 ships the LND
+  typed surface, gRPC polling collector, and two diagnostic rules
+  (`lnd.channel_inactive`, `lnd.chain_backend_lag`) in-tree, but
+  the runtime wiring + `[collectors.lnd]` config-loading land in
+  BTH-67 (Polar e2e) and BTH-68. Elements has no collector yet.
 - Subscribe to ZMQ (the `zmq_endpoint` field is parsed but ignored).
 - Expose a UI. The operator API is read-only JSON over loopback HTTP;
   a browser UI is V0.2.
@@ -166,12 +169,14 @@ exponential-backoff respawn.
 
 ## Roadmap
 
-| Milestone | Scope |
-|-----------|-------|
-| V0    | Single Bitcoin Core node, three diagnostic rules, three notification sinks, SQLite storage, local config. |
-| V0.1  | LND + host collectors, additional diagnostic rules, suppression rules + maintenance windows, observation-store replay, retry scheduler. |
-| V0.2  | Operator UI, acknowledge / manual resolve, dashboards, file-ref secrets. |
-| V1.0+ | Cloud sync (Postgres backend), HA / multi-sidecar, plugin system. |
+| Milestone | Status | Scope |
+|-----------|--------|-------|
+| V0    | Shipped (0.0.5.0) | Single Bitcoin Core node, three diagnostic rules, three notification sinks, SQLite storage, local config. |
+| V0.A  | Shipped (0.0.7.0) | Loopback operator HTTP API (`GET /health`, `/incidents/open`, `/incidents/:id`, `/incidents/:id/evidence`). |
+| V0.8  | In progress (0.0.8.0 + BTH-67, BTH-68) | LND wedge: typed surface, gRPC polling collector, two diagnostic rules in-tree; Polar e2e + runtime wiring still open. |
+| V0.9+ | Planned | Host collector, additional diagnostic rules, suppression rules + maintenance windows, observation-store replay, retry scheduler. |
+| V0.2  | Planned | Operator UI, acknowledge / manual resolve, dashboards, file-ref secrets. |
+| V1.0+ | Planned | Cloud sync (Postgres backend), HA / multi-sidecar, plugin system. |
 
 V0 ships in phases tracked in `IMPLEMENTATION_PLAN.md`; the 41
 implementation tickets live in `TICKETS.md` (and are also filed as
@@ -212,7 +217,7 @@ migrations/               sqlx-managed SQLite schema
 V0 tickets are tagged by phase, size, and priority — see the
 [Issues](../../issues) page or filter by:
 
-- `is:open label:phase:12` — current phase (end-to-end + docs)
+- `is:open label:phase:v0.8` — current phase (V0.8 LND-first wedge)
 - `is:open label:priority:high label:size:S` — small high-priority
   work
 - `is:open label:size:L` — larger stories
