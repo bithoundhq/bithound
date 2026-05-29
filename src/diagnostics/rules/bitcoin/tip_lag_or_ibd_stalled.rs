@@ -11,7 +11,6 @@
 //! operator with open/resolve pairs.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -79,7 +78,7 @@ struct SubjectState {
 pub struct BitcoinTipLagOrIbdStalledRule {
     a2_flat_window: Duration,
     debounce_ticks: u32,
-    state: Mutex<HashMap<EntityRef, SubjectState>>,
+    state: HashMap<EntityRef, SubjectState>,
 }
 
 impl Default for BitcoinTipLagOrIbdStalledRule {
@@ -101,7 +100,7 @@ impl BitcoinTipLagOrIbdStalledRule {
         Self {
             a2_flat_window,
             debounce_ticks,
-            state: Mutex::new(HashMap::new()),
+            state: HashMap::new(),
         }
     }
 }
@@ -127,7 +126,7 @@ impl DiagnosticRule for BitcoinTipLagOrIbdStalledRule {
         "bitcoin.tip_lag_or_ibd_stalled"
     }
 
-    fn evaluate(&self, ctx: DiagnosticContext<'_>) -> Result<Vec<IncidentSignalDraft>> {
+    fn evaluate(&mut self, ctx: DiagnosticContext<'_>) -> Result<Vec<IncidentSignalDraft>> {
         let node_id = match ctx.subject {
             EntityRef::BitcoinNode(id) => id.clone(),
             _ => return Ok(vec![]),
@@ -140,12 +139,13 @@ impl DiagnosticRule for BitcoinTipLagOrIbdStalledRule {
             return Ok(vec![]);
         };
 
-        let mut guard = lock_state(&self.state);
-        prune_stale(&mut guard, ctx.monotonic_now);
-        if !guard.contains_key(ctx.subject) {
-            guard.insert(ctx.subject.clone(), SubjectState::default());
+        prune_stale(&mut self.state, ctx.monotonic_now);
+        if !self.state.contains_key(ctx.subject) {
+            self.state
+                .insert(ctx.subject.clone(), SubjectState::default());
         }
-        let entry = guard
+        let entry = self
+            .state
             .get_mut(ctx.subject)
             .expect("inserted above if missing");
         entry.last_touched_at = Some(ctx.monotonic_now);
@@ -183,9 +183,10 @@ impl DiagnosticRule for BitcoinTipLagOrIbdStalledRule {
 }
 
 /// Update A2's flat-window tracker in `state` from the latest blockchain
-/// observation, then decide whether either A1 or A2 holds. Single lock
-/// site: callers hold the rule mutex around the entire call so the
-/// progress tracker can't tear across a concurrent evaluation.
+/// observation, then decide whether either A1 or A2 holds. Single
+/// caller: `evaluate` holds `&mut self.state` directly across the call,
+/// and the consumer task is the only writer per ADR-S1, so the progress
+/// tracker can't tear across a concurrent evaluation.
 fn update_state_and_classify(
     state: &mut SubjectState,
     blockchain: &BitcoinBlockchainState,
@@ -219,17 +220,6 @@ fn update_state_and_classify(
         Classification::Firing
     } else {
         Classification::NotFiring
-    }
-}
-
-/// Recover the rule's state lock through poisoning so a panicking
-/// evaluation doesn't permanently brick this rule.
-fn lock_state(
-    mutex: &Mutex<HashMap<EntityRef, SubjectState>>,
-) -> std::sync::MutexGuard<'_, HashMap<EntityRef, SubjectState>> {
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
     }
 }
 
@@ -349,8 +339,10 @@ mod tests {
 
     #[test]
     fn id_is_kind_name() {
-        let rule = BitcoinTipLagOrIbdStalledRule::new();
-        assert_eq!(rule.id(), "bitcoin.tip_lag_or_ibd_stalled");
+        assert_eq!(
+            BitcoinTipLagOrIbdStalledRule::new().id(),
+            "bitcoin.tip_lag_or_ibd_stalled"
+        );
     }
 
     #[test]
@@ -358,7 +350,7 @@ mod tests {
         let mut rm = FakeReadModels::default();
         set_a1_firing(&mut rm, t0());
 
-        let rule = BitcoinTipLagOrIbdStalledRule::new();
+        let mut rule = BitcoinTipLagOrIbdStalledRule::new();
         let subject = node();
         let i0 = Instant::now();
 
@@ -371,7 +363,7 @@ mod tests {
         let mut rm = FakeReadModels::default();
         set_a1_firing(&mut rm, t0());
 
-        let rule = BitcoinTipLagOrIbdStalledRule::new();
+        let mut rule = BitcoinTipLagOrIbdStalledRule::new();
         let subject = node();
         let i0 = Instant::now();
 
@@ -405,7 +397,7 @@ mod tests {
         let mut rm = FakeReadModels::default();
         set_a1_firing(&mut rm, t0());
 
-        let rule = BitcoinTipLagOrIbdStalledRule::new();
+        let mut rule = BitcoinTipLagOrIbdStalledRule::new();
         let subject = node();
         let i0 = Instant::now();
 
@@ -449,7 +441,7 @@ mod tests {
 
     #[test]
     fn a2_fires_when_verification_progress_is_flat_over_window() {
-        let rule = BitcoinTipLagOrIbdStalledRule::new();
+        let mut rule = BitcoinTipLagOrIbdStalledRule::new();
         let subject = node();
         let mut rm = FakeReadModels::default();
         let i0 = Instant::now();
@@ -500,7 +492,7 @@ mod tests {
 
     #[test]
     fn a2_does_not_fire_when_progress_keeps_advancing() {
-        let rule = BitcoinTipLagOrIbdStalledRule::new();
+        let mut rule = BitcoinTipLagOrIbdStalledRule::new();
         let subject = node();
         let mut rm = FakeReadModels::default();
         let i0 = Instant::now();
@@ -526,7 +518,7 @@ mod tests {
     #[test]
     fn unknown_state_leaves_counters_alone() {
         let rm = FakeReadModels::default();
-        let rule = BitcoinTipLagOrIbdStalledRule::new();
+        let mut rule = BitcoinTipLagOrIbdStalledRule::new();
         let subject = node();
         let i0 = Instant::now();
         for offset in [0u64, 30, 60, 90] {
@@ -545,7 +537,7 @@ mod tests {
     #[test]
     fn non_bitcoin_subject_emits_nothing() {
         let rm = FakeReadModels::default();
-        let rule = BitcoinTipLagOrIbdStalledRule::new();
+        let mut rule = BitcoinTipLagOrIbdStalledRule::new();
         let lnd = EntityRef::LndNode(crate::shared::types::LndNodeId("ln1".into()));
         let drafts = rule.evaluate(ctx(&rm, &lnd, t0(), Instant::now())).unwrap();
         assert!(drafts.is_empty());
@@ -555,7 +547,7 @@ mod tests {
     fn a2_does_not_fire_just_below_flat_window() {
         // Boundary test: the second tick lands one second *before* the
         // 5-minute flat window completes. A2 must NOT report firing.
-        let rule = BitcoinTipLagOrIbdStalledRule::new();
+        let mut rule = BitcoinTipLagOrIbdStalledRule::new();
         let subject = node();
         let mut rm = FakeReadModels::default();
         let i0 = Instant::now();
@@ -586,7 +578,7 @@ mod tests {
         // 1000 (with IBD finished, so A1's IBD precondition fails)
         // and verification_progress flat over the window, only A2 can
         // cover this — and it must.
-        let rule = BitcoinTipLagOrIbdStalledRule::new();
+        let mut rule = BitcoinTipLagOrIbdStalledRule::new();
         let subject = node();
         let mut rm = FakeReadModels::default();
         let i0 = Instant::now();

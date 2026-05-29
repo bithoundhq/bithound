@@ -3,7 +3,6 @@
 //! networking. A node with no outbound peers can't follow the chain.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -46,7 +45,7 @@ struct SubjectState {
 #[derive(Debug)]
 pub struct BitcoinNoPeersRule {
     debounce: Duration,
-    state: Mutex<HashMap<EntityRef, SubjectState>>,
+    state: HashMap<EntityRef, SubjectState>,
 }
 
 impl Default for BitcoinNoPeersRule {
@@ -63,7 +62,7 @@ impl BitcoinNoPeersRule {
     pub fn with_debounce(debounce: Duration) -> Self {
         Self {
             debounce,
-            state: Mutex::new(HashMap::new()),
+            state: HashMap::new(),
         }
     }
 }
@@ -117,7 +116,7 @@ impl DiagnosticRule for BitcoinNoPeersRule {
         "bitcoin.no_peers"
     }
 
-    fn evaluate(&self, ctx: DiagnosticContext<'_>) -> Result<Vec<IncidentSignalDraft>> {
+    fn evaluate(&mut self, ctx: DiagnosticContext<'_>) -> Result<Vec<IncidentSignalDraft>> {
         let node_id = match ctx.subject {
             EntityRef::BitcoinNode(id) => id.clone(),
             _ => return Ok(vec![]),
@@ -125,12 +124,13 @@ impl DiagnosticRule for BitcoinNoPeersRule {
 
         let condition = classify(&ctx, &node_id);
 
-        let mut guard = lock_state(&self.state);
-        prune_stale(&mut guard, ctx.monotonic_now);
-        if !guard.contains_key(ctx.subject) {
-            guard.insert(ctx.subject.clone(), SubjectState::default());
+        prune_stale(&mut self.state, ctx.monotonic_now);
+        if !self.state.contains_key(ctx.subject) {
+            self.state
+                .insert(ctx.subject.clone(), SubjectState::default());
         }
-        let entry = guard
+        let entry = self
+            .state
             .get_mut(ctx.subject)
             .expect("inserted above if missing");
         entry.last_touched_at = Some(ctx.monotonic_now);
@@ -161,20 +161,6 @@ impl DiagnosticRule for BitcoinNoPeersRule {
         }
 
         Ok(drafts)
-    }
-}
-
-/// Recover the rule's state lock through poisoning so one panicking
-/// evaluation doesn't cascade into a permanently broken rule. The
-/// consumer task's `catch_unwind` wrapper logs the original panic;
-/// future ticks rebuild the firing/clearing counters from observed
-/// state.
-fn lock_state(
-    mutex: &Mutex<HashMap<EntityRef, SubjectState>>,
-) -> std::sync::MutexGuard<'_, HashMap<EntityRef, SubjectState>> {
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
     }
 }
 
@@ -272,8 +258,7 @@ mod tests {
 
     #[test]
     fn id_is_kind_name() {
-        let rule = BitcoinNoPeersRule::new();
-        assert_eq!(rule.id(), "bitcoin.no_peers");
+        assert_eq!(BitcoinNoPeersRule::new().id(), "bitcoin.no_peers");
     }
 
     #[test]
@@ -281,7 +266,7 @@ mod tests {
         let mut rm = FakeReadModels::default();
         set_zero_peers_active(&mut rm, t0());
 
-        let rule = BitcoinNoPeersRule::new();
+        let mut rule = BitcoinNoPeersRule::new();
         let subject = node();
         let i0 = Instant::now();
 
@@ -312,7 +297,7 @@ mod tests {
         let mut rm = FakeReadModels::default();
         set_zero_peers_active(&mut rm, t0());
 
-        let rule = BitcoinNoPeersRule::new();
+        let mut rule = BitcoinNoPeersRule::new();
         let subject = node();
         let i0 = Instant::now();
 
@@ -357,7 +342,7 @@ mod tests {
         rm.set_state(&node(), network_state(0, false), t0());
         rm.set_state(&node(), peer_summary(0), t0());
 
-        let rule = BitcoinNoPeersRule::new();
+        let mut rule = BitcoinNoPeersRule::new();
         let subject = node();
         let i0 = Instant::now();
 
@@ -382,7 +367,7 @@ mod tests {
         let mut rm = FakeReadModels::default();
         set_zero_peers_active(&mut rm, t0());
 
-        let rule = BitcoinNoPeersRule::new();
+        let mut rule = BitcoinNoPeersRule::new();
         let subject = node();
         let i0 = Instant::now();
 
@@ -418,7 +403,7 @@ mod tests {
         // returns Unknown. The rule should stay quiet across multiple
         // ticks even after the debounce window has elapsed.
         let rm = FakeReadModels::default();
-        let rule = BitcoinNoPeersRule::new();
+        let mut rule = BitcoinNoPeersRule::new();
         let subject = node();
         let i0 = Instant::now();
         for offset in [0u64, 60, 600] {
@@ -437,7 +422,7 @@ mod tests {
     #[test]
     fn non_bitcoin_subject_emits_nothing() {
         let rm = FakeReadModels::default();
-        let rule = BitcoinNoPeersRule::new();
+        let mut rule = BitcoinNoPeersRule::new();
         let lnd = EntityRef::LndNode(crate::shared::types::LndNodeId("ln1".into()));
         let drafts = rule.evaluate(ctx(&rm, &lnd, t0(), Instant::now())).unwrap();
         assert!(drafts.is_empty());

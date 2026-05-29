@@ -8,7 +8,6 @@
 //! single most important condition to surface.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -57,7 +56,7 @@ struct SubjectState {
 #[derive(Debug)]
 pub struct BitcoinRpcUnreachableRule {
     debounce: Duration,
-    state: Mutex<HashMap<EntityRef, SubjectState>>,
+    state: HashMap<EntityRef, SubjectState>,
 }
 
 impl Default for BitcoinRpcUnreachableRule {
@@ -74,7 +73,7 @@ impl BitcoinRpcUnreachableRule {
     pub fn with_debounce(debounce: Duration) -> Self {
         Self {
             debounce,
-            state: Mutex::new(HashMap::new()),
+            state: HashMap::new(),
         }
     }
 
@@ -95,7 +94,7 @@ impl DiagnosticRule for BitcoinRpcUnreachableRule {
         "bitcoin.rpc_unreachable"
     }
 
-    fn evaluate(&self, ctx: DiagnosticContext<'_>) -> Result<Vec<IncidentSignalDraft>> {
+    fn evaluate(&mut self, ctx: DiagnosticContext<'_>) -> Result<Vec<IncidentSignalDraft>> {
         // Only meaningful for Bitcoin node subjects.
         //
         // Note on "silent" inputs: a target with no health observation
@@ -111,15 +110,16 @@ impl DiagnosticRule for BitcoinRpcUnreachableRule {
 
         let all_critical = self.all_four_critical(&ctx);
 
-        let mut guard = lock_state(&self.state);
-        prune_stale(&mut guard, ctx.monotonic_now);
+        prune_stale(&mut self.state, ctx.monotonic_now);
         // Look up first so we only clone the subject key when we
         // actually have to insert. Lets the hot "subject already known"
         // path skip the allocation entirely.
-        if !guard.contains_key(ctx.subject) {
-            guard.insert(ctx.subject.clone(), SubjectState::default());
+        if !self.state.contains_key(ctx.subject) {
+            self.state
+                .insert(ctx.subject.clone(), SubjectState::default());
         }
-        let entry = guard
+        let entry = self
+            .state
             .get_mut(ctx.subject)
             .expect("inserted above if missing");
         entry.last_touched_at = Some(ctx.monotonic_now);
@@ -147,22 +147,6 @@ impl DiagnosticRule for BitcoinRpcUnreachableRule {
         }
 
         Ok(drafts)
-    }
-}
-
-/// Acquire the rule's state lock, recovering through poisoning.
-///
-/// A panic inside one `evaluate` call would leave the mutex poisoned and
-/// every subsequent call would re-panic, which the consumer task's
-/// `catch_unwind` wrapper would just log over and over. Better to take
-/// the inner data and keep working — the next evaluation rebuilds the
-/// firing/clearing counters from observed state anyway.
-fn lock_state(
-    mutex: &Mutex<HashMap<EntityRef, SubjectState>>,
-) -> std::sync::MutexGuard<'_, HashMap<EntityRef, SubjectState>> {
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
     }
 }
 
@@ -237,8 +221,10 @@ mod tests {
 
     #[test]
     fn id_is_kind_name() {
-        let rule = BitcoinRpcUnreachableRule::new();
-        assert_eq!(rule.id(), "bitcoin.rpc_unreachable");
+        assert_eq!(
+            BitcoinRpcUnreachableRule::new().id(),
+            "bitcoin.rpc_unreachable"
+        );
     }
 
     /// Build a monotonic-clock offset from a base `Instant`. Tests bind
@@ -254,7 +240,7 @@ mod tests {
         let mut rm = FakeReadModels::default();
         set_all_critical(&mut rm, t0());
 
-        let rule = BitcoinRpcUnreachableRule::new();
+        let mut rule = BitcoinRpcUnreachableRule::new();
         let subject = node();
         let i0 = Instant::now();
 
@@ -291,7 +277,7 @@ mod tests {
         let mut rm = FakeReadModels::default();
         set_all_critical(&mut rm, t0());
 
-        let rule = BitcoinRpcUnreachableRule::new();
+        let mut rule = BitcoinRpcUnreachableRule::new();
         let subject = node();
         let i0 = Instant::now();
 
@@ -323,7 +309,7 @@ mod tests {
         let mut rm = FakeReadModels::default();
         set_all_critical(&mut rm, t0());
 
-        let rule = BitcoinRpcUnreachableRule::new();
+        let mut rule = BitcoinRpcUnreachableRule::new();
         let subject = node();
         let i0 = Instant::now();
 
@@ -368,7 +354,7 @@ mod tests {
         let mut rm = FakeReadModels::default();
         set_all_critical(&mut rm, t0());
 
-        let rule = BitcoinRpcUnreachableRule::new();
+        let mut rule = BitcoinRpcUnreachableRule::new();
         let subject = node();
         let i0 = Instant::now();
 
@@ -415,7 +401,7 @@ mod tests {
     #[test]
     fn non_bitcoin_subject_emits_nothing() {
         let rm = FakeReadModels::default();
-        let rule = BitcoinRpcUnreachableRule::new();
+        let mut rule = BitcoinRpcUnreachableRule::new();
         let lnd = EntityRef::LndNode(crate::shared::types::LndNodeId("ln1".into()));
         let drafts = rule.evaluate(ctx(&rm, &lnd, t0(), Instant::now())).unwrap();
         assert!(drafts.is_empty());
