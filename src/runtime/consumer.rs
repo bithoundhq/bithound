@@ -40,7 +40,7 @@ use crate::storage::traits::ObservationStore;
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     mut rx: mpsc::Receiver<ObservationBatch>,
-    rules: Vec<Box<dyn DiagnosticRule>>,
+    mut rules: Vec<Box<dyn DiagnosticRule>>,
     mut read_models: ReadModelStore,
     mut engine: IncidentEngine,
     notification_rules: Vec<NotificationRule>,
@@ -57,7 +57,7 @@ pub async fn run(
                 Some(batch) => {
                     process_batch(
                         batch,
-                        &rules,
+                        &mut rules,
                         &mut read_models,
                         &mut engine,
                         &notification_rules,
@@ -79,7 +79,7 @@ pub async fn run(
     while let Some(batch) = rx.recv().await {
         process_batch(
             batch,
-            &rules,
+            &mut rules,
             &mut read_models,
             &mut engine,
             &notification_rules,
@@ -95,7 +95,7 @@ pub async fn run(
 #[allow(clippy::too_many_arguments)]
 async fn process_batch(
     batch: ObservationBatch,
-    rules: &[Box<dyn DiagnosticRule>],
+    rules: &mut [Box<dyn DiagnosticRule>],
     read_models: &mut ReadModelStore,
     engine: &mut IncidentEngine,
     notification_rules: &[NotificationRule],
@@ -190,7 +190,7 @@ fn observations_from_batch(batch: &ObservationBatch) -> Vec<Observation> {
 }
 
 fn evaluate_rules(
-    rules: &[Box<dyn DiagnosticRule>],
+    rules: &mut [Box<dyn DiagnosticRule>],
     read_models: &ReadModelStore,
     subject: &EntityRef,
     now: DateTime<Utc>,
@@ -198,7 +198,7 @@ fn evaluate_rules(
     collector_id: &str,
 ) -> Vec<IncidentSignalDraft> {
     let mut drafts: Vec<IncidentSignalDraft> = Vec::new();
-    for rule in rules {
+    for rule in rules.iter_mut() {
         let ctx = DiagnosticContext {
             now,
             monotonic_now,
@@ -593,7 +593,10 @@ mod tests {
         fn id(&self) -> &'static str {
             "always-tip-lag"
         }
-        fn evaluate(&self, ctx: DiagnosticContext<'_>) -> anyhow::Result<Vec<IncidentSignalDraft>> {
+        fn evaluate(
+            &mut self,
+            ctx: DiagnosticContext<'_>,
+        ) -> anyhow::Result<Vec<IncidentSignalDraft>> {
             let kind =
                 crate::incidents::IncidentKind::parse("bitcoin.tip_lag").expect("valid test kind");
             Ok(vec![IncidentSignalDraft {
@@ -685,7 +688,7 @@ mod tests {
             "panic"
         }
         fn evaluate(
-            &self,
+            &mut self,
             _ctx: DiagnosticContext<'_>,
         ) -> anyhow::Result<Vec<IncidentSignalDraft>> {
             panic!("rule panic")

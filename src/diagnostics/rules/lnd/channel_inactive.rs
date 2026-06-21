@@ -13,7 +13,6 @@
 //! the peer's LND like channel.db corruption or a hung wallet.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -53,7 +52,7 @@ struct SubjectState {
 pub struct LndChannelInactiveRule {
     public_debounce: Duration,
     private_debounce: Duration,
-    state: Mutex<HashMap<EntityRef, SubjectState>>,
+    state: HashMap<EntityRef, SubjectState>,
 }
 
 impl Default for LndChannelInactiveRule {
@@ -71,7 +70,7 @@ impl LndChannelInactiveRule {
         Self {
             public_debounce,
             private_debounce,
-            state: Mutex::new(HashMap::new()),
+            state: HashMap::new(),
         }
     }
 }
@@ -81,7 +80,7 @@ impl DiagnosticRule for LndChannelInactiveRule {
         "lnd.channel_inactive"
     }
 
-    fn evaluate(&self, ctx: DiagnosticContext<'_>) -> Result<Vec<IncidentSignalDraft>> {
+    fn evaluate(&mut self, ctx: DiagnosticContext<'_>) -> Result<Vec<IncidentSignalDraft>> {
         // Only meaningful for LndChannel subjects.
         if !matches!(ctx.subject, EntityRef::LndChannel { .. }) {
             return Ok(vec![]);
@@ -101,12 +100,13 @@ impl DiagnosticRule for LndChannelInactiveRule {
             None => return Ok(vec![]),
         };
 
-        let mut guard = lock_state(&self.state);
-        prune_stale(&mut guard, ctx.monotonic_now);
-        if !guard.contains_key(ctx.subject) {
-            guard.insert(ctx.subject.clone(), SubjectState::default());
+        prune_stale(&mut self.state, ctx.monotonic_now);
+        if !self.state.contains_key(ctx.subject) {
+            self.state
+                .insert(ctx.subject.clone(), SubjectState::default());
         }
-        let entry = guard
+        let entry = self
+            .state
             .get_mut(ctx.subject)
             .expect("inserted above if missing");
         entry.last_touched_at = Some(ctx.monotonic_now);
@@ -175,15 +175,6 @@ fn build_draft(
         status,
         confidence,
         evidence: vec![],
-    }
-}
-
-fn lock_state(
-    mutex: &Mutex<HashMap<EntityRef, SubjectState>>,
-) -> std::sync::MutexGuard<'_, HashMap<EntityRef, SubjectState>> {
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
     }
 }
 

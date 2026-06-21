@@ -14,7 +14,6 @@
 //! louder signal for unconfigured correlations.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -53,7 +52,7 @@ pub struct LndChainBackendLagRule {
     correlation_target: BitcoinNodeId,
     lag_blocks_threshold: u64,
     lag_persist: Duration,
-    state: Mutex<HashMap<EntityRef, SubjectState>>,
+    state: HashMap<EntityRef, SubjectState>,
 }
 
 impl LndChainBackendLagRule {
@@ -80,7 +79,7 @@ impl LndChainBackendLagRule {
             correlation_target,
             lag_blocks_threshold,
             lag_persist,
-            state: Mutex::new(HashMap::new()),
+            state: HashMap::new(),
         }
     }
 }
@@ -90,7 +89,7 @@ impl DiagnosticRule for LndChainBackendLagRule {
         "lnd.chain_backend_lag"
     }
 
-    fn evaluate(&self, ctx: DiagnosticContext<'_>) -> Result<Vec<IncidentSignalDraft>> {
+    fn evaluate(&mut self, ctx: DiagnosticContext<'_>) -> Result<Vec<IncidentSignalDraft>> {
         // Only meaningful for LndNode subjects.
         if !matches!(ctx.subject, EntityRef::LndNode(_)) {
             return Ok(vec![]);
@@ -138,12 +137,13 @@ impl DiagnosticRule for LndChainBackendLagRule {
         // bitcoind ahead of LND by > threshold = lag condition.
         let lagged = bitcoind_height.saturating_sub(lnd_height) > self.lag_blocks_threshold;
 
-        let mut guard = lock_state(&self.state);
-        prune_stale(&mut guard, ctx.monotonic_now);
-        if !guard.contains_key(ctx.subject) {
-            guard.insert(ctx.subject.clone(), SubjectState::default());
+        prune_stale(&mut self.state, ctx.monotonic_now);
+        if !self.state.contains_key(ctx.subject) {
+            self.state
+                .insert(ctx.subject.clone(), SubjectState::default());
         }
-        let entry = guard
+        let entry = self
+            .state
             .get_mut(ctx.subject)
             .expect("inserted above if missing");
         entry.last_touched_at = Some(ctx.monotonic_now);
@@ -181,15 +181,6 @@ fn build_draft(subject: &EntityRef, status: SignalStatus) -> IncidentSignalDraft
         status,
         confidence: Confidence::High,
         evidence: vec![],
-    }
-}
-
-fn lock_state(
-    mutex: &Mutex<HashMap<EntityRef, SubjectState>>,
-) -> std::sync::MutexGuard<'_, HashMap<EntityRef, SubjectState>> {
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
     }
 }
 
